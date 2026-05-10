@@ -72,7 +72,7 @@ are opt-in to keep the default binary small.
 | `mysql`         | `MySQL` / `MariaDB` probe via `mysql_async` + rustls |
 | `redis`         | Redis probe via `redis` crate + rustls     |
 | `json-output`   | `--output json` line-delimited events      |
-| `all-databases` | `postgres` + `redis`                       |
+| `all-databases` | `postgres` + `mysql` + `redis`             |
 | `full`          | Everything above                           |
 
 ## Exit codes

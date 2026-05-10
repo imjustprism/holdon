@@ -42,7 +42,14 @@ fn install_provider_once() {
 
 async fn connect_and_query(conn_str: &str, want_tls: bool) -> mysql_async::Result<()> {
     install_provider_once();
-    let base = Opts::from_url(conn_str)?;
+    let normalized: String;
+    let for_opts: &str = if let Some(rest) = conn_str.strip_prefix("mariadb://") {
+        normalized = format!("mysql://{rest}");
+        normalized.as_str()
+    } else {
+        conn_str
+    };
+    let base = Opts::from_url(for_opts)?;
     let mut builder = OptsBuilder::from_opts(base);
     if want_tls {
         builder = builder.ssl_opts(Some(SslOpts::default()));
