@@ -92,10 +92,21 @@ async fn run(args: Args) -> Result<ExitStatus> {
         if args.insecure {
             eprintln!("holdon: WARNING: TLS verification disabled (--insecure)");
         }
+        let extra_ca_pem = match args.ca_cert.as_ref() {
+            Some(path) => vec![
+                std::fs::read(path)
+                    .with_context(|| format!("reading --ca-cert from {}", path.display()))?,
+            ],
+            None => Vec::new(),
+        };
         holdon::checker::http::set_global(holdon::checker::http::HttpConfig {
             headers,
             method: args.method.into(),
             insecure: args.insecure,
+            follow_redirects: !args.no_follow_redirects,
+            body_substring: args.expect_body.clone(),
+            extra_ca_pem,
+            min_tls: args.tls_min.into(),
         });
     }
 
