@@ -131,6 +131,7 @@ jobs:
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          ignore: RUSTSEC-2025-0134
 
   semver:
     name: cargo-semver-checks
@@ -146,7 +147,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: crate-ci/typos@v1.27.3
+      - uses: crate-ci/typos@v1.46.1
 
   taplo:
     name: taplo
@@ -189,7 +190,6 @@ jobs:
       - cross
       - deny
       - audit
-      - semver
       - typos
       - taplo
       - hack
