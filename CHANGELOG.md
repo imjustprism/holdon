@@ -1,0 +1,43 @@
+# Changelog
+
+All notable changes to this project will be documented in this file. Format
+follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This
+project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.1.0] - 2026-05-10
+
+### Added
+
+- TCP, `host:port`, and `:port` shorthand
+- HTTP / HTTPS probes with configurable status range, custom headers
+  (`-H`), method (`--method`), and `--insecure` for self-signed certs
+- DNS resolution probes (`dns://`)
+- Postgres `SELECT 1` probes with rustls TLS (opportunistic upgrade,
+  honors `?sslmode=disable`), behind `postgres` feature
+- Redis `PING` probes with rustls TLS for `rediss://`, behind `redis`
+  feature
+- File existence and absence probes (`file://`)
+- External command probes (`exec://`), the universal escape hatch
+- Parallel orchestration with exponential backoff and jitter
+- Diagnostic staged output (DNS, TCP, protocol stage)
+- JSON output with stable schema (`v: 1`) and unix-ms timestamps
+- Live matrix-dot spinner, sparklines, per-target latency
+- Stdin target list (`-`) with comments and BOM stripping
+- Cargo features: `http`, `postgres`, `redis`, `json-output`,
+  `all-databases`, `full`
+- POSIX exit codes: `0` ready, `2` misuse, `124` timeout, `126` exec
+  permission, `127` exec not found, `130` / `143` signal
+
+### Security
+
+- TLS is rustls only, no OpenSSL anywhere in the tree
+- `file://` probes use `symlink_metadata` (no symlink follow)
+- HTTP redirects refuse `https → http` downgrades
+- Passwords redacted in `Display`, `Debug`, and error chains
+- `--insecure` emits a stderr warning on every run
+- Stdin target ingest capped at 10 000 entries and 2 KiB per string
+
+[Unreleased]: https://github.com/imjustprism/holdon/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/imjustprism/holdon/releases/tag/v0.1.0

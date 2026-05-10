@@ -1,0 +1,107 @@
+pub(crate) trait Hintable {
+    fn hint(&self) -> Option<&'static str>;
+}
+
+#[allow(dead_code)]
+pub(crate) mod hints {
+    pub(crate) const TIMED_OUT: &str = "timed out";
+    pub(crate) const SERVER_SLOW: &str = "server slow or unreachable";
+    pub(crate) const NOT_LISTENING: &str = "service not listening on this port yet";
+    pub(crate) const PORT_CLOSED: &str = "port closed or firewalled";
+    pub(crate) const NET_UNREACHABLE: &str = "network or route problem, not a port-closed issue";
+    pub(crate) const PG_NOT_READY: &str = "server not accepting queries yet";
+    pub(crate) const PG_TLS: &str =
+        "connection failed before reaching the server (TLS may be required)";
+    pub(crate) const PG_CREDS: &str = "check credentials in the connection URL";
+    pub(crate) const PG_NO_DB: &str = "database does not exist (or still initializing)";
+    pub(crate) const PG_STARTING: &str = "server is starting up or shutting down, keep retrying";
+    pub(crate) const PG_RECOVERY: &str = "server is in recovery or read-only mode";
+    pub(crate) const REDIS_NOT_READY: &str = "server slow or not yet listening";
+    pub(crate) const REDIS_AUTH: &str = "set the password in the URL or via AUTH";
+    pub(crate) const REDIS_LOADING: &str = "redis is loading the dataset into memory";
+    pub(crate) const REDIS_CLUSTER: &str = "cluster topology not yet stable";
+    pub(crate) const REDIS_TLS: &str =
+        "TLS handshake failed, check rediss:// scheme and server certificate";
+    pub(crate) const HTTP_RETRY: &str = "service may still be initializing";
+    pub(crate) const DNS_HINT: &str = "check hostname spelling and DNS server";
+    pub(crate) const FILE_IO: &str = "permission or IO error reading the path";
+    pub(crate) const EXEC_NOT_FOUND: &str =
+        "executable not found in PATH or as relative/absolute path";
+    pub(crate) const EXEC_PERMISSION: &str = "file exists but is not executable (chmod +x?)";
+    pub(crate) const EXEC_NONZERO: &str = "command reported not-ready, will retry";
+    pub(crate) const EXEC_TIMED_OUT: &str =
+        "child did not finish before attempt timeout, increase --attempt-timeout";
+}
+
+impl Hintable for std::io::Error {
+    fn hint(&self) -> Option<&'static str> {
+        match self.kind() {
+            std::io::ErrorKind::ConnectionRefused => Some(hints::NOT_LISTENING),
+            std::io::ErrorKind::HostUnreachable | std::io::ErrorKind::NetworkUnreachable => {
+                Some(hints::NET_UNREACHABLE)
+            }
+            std::io::ErrorKind::TimedOut => Some(hints::PORT_CLOSED),
+            std::io::ErrorKind::PermissionDenied => Some(hints::FILE_IO),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(feature = "http")]
+impl Hintable for reqwest::Error {
+    fn hint(&self) -> Option<&'static str> {
+        if self.is_timeout() {
+            Some(hints::SERVER_SLOW)
+        } else if self.is_connect() {
+            Some(hints::PORT_CLOSED)
+        } else if self.is_status() {
+            Some(hints::HTTP_RETRY)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(feature = "postgres")]
+impl Hintable for tokio_postgres::Error {
+    fn hint(&self) -> Option<&'static str> {
+        use tokio_postgres::error::SqlState;
+        let Some(code) = self.code() else {
+            return Some(hints::PG_TLS);
+        };
+        if code == &SqlState::INVALID_PASSWORD
+            || code == &SqlState::INVALID_AUTHORIZATION_SPECIFICATION
+        {
+            return Some(hints::PG_CREDS);
+        }
+        if code == &SqlState::INVALID_CATALOG_NAME {
+            return Some(hints::PG_NO_DB);
+        }
+        if code == &SqlState::CANNOT_CONNECT_NOW
+            || code == &SqlState::ADMIN_SHUTDOWN
+            || code == &SqlState::CRASH_SHUTDOWN
+        {
+            return Some(hints::PG_STARTING);
+        }
+        if code == &SqlState::READ_ONLY_SQL_TRANSACTION {
+            return Some(hints::PG_RECOVERY);
+        }
+        None
+    }
+}
+
+#[cfg(feature = "redis")]
+impl Hintable for redis::RedisError {
+    fn hint(&self) -> Option<&'static str> {
+        use redis::ErrorKind::{
+            AuthenticationFailed, BusyLoadingError, ClusterDown, InvalidClientConfig, MasterDown,
+        };
+        match self.kind() {
+            AuthenticationFailed => Some(hints::REDIS_AUTH),
+            BusyLoadingError => Some(hints::REDIS_LOADING),
+            MasterDown | ClusterDown => Some(hints::REDIS_CLUSTER),
+            InvalidClientConfig => Some(hints::REDIS_TLS),
+            _ => None,
+        }
+    }
+}

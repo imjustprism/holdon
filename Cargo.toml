@@ -1,0 +1,120 @@
+[package]
+name = "holdon"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+description = "Wait for anything. Know why if it doesn't."
+repository = "https://github.com/imjustprism/holdon"
+readme = "README.md"
+keywords = ["wait", "cli", "docker", "ci", "healthcheck"]
+categories = ["command-line-utilities", "network-programming"]
+include = [
+    "/src",
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE-MIT",
+    "/LICENSE-APACHE",
+    "/examples",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[[bin]]
+name = "holdon"
+path = "src/main.rs"
+
+[lib]
+name = "holdon"
+path = "src/lib.rs"
+
+[features]
+default = ["http", "json-output"]
+http = ["dep:reqwest"]
+postgres = ["dep:tokio-postgres", "dep:tokio-postgres-rustls", "dep:rustls", "dep:webpki-roots"]
+redis = ["dep:redis"]
+json-output = ["dep:serde_json"]
+all-databases = ["postgres", "redis"]
+full = ["http", "postgres", "redis", "json-output"]
+
+[dependencies]
+tokio = { version = "1.41", default-features = false, features = ["rt", "macros", "net", "time", "process", "io-util", "signal", "fs", "sync"] }
+clap = { version = "4.5", default-features = false, features = ["derive", "std", "help", "usage", "error-context", "suggestions", "color", "env"] }
+thiserror = { version = "2.0", default-features = false }
+anyhow = { version = "1.0", default-features = false, features = ["std"] }
+owo-colors = { version = "4.1", default-features = false, features = ["supports-colors"] }
+crossterm = { version = "0.28", default-features = false, features = ["windows"] }
+fastrand = { version = "2.1", default-features = false, features = ["std"] }
+url = { version = "2.5", default-features = false, features = ["std"] }
+tracing = { version = "0.1", default-features = false, features = ["std", "attributes"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "http2"], optional = true }
+tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"], optional = true }
+tokio-postgres-rustls = { version = "0.13", default-features = false, optional = true }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"], optional = true }
+webpki-roots = { version = "0.26", optional = true }
+redis = { version = "0.27", default-features = false, features = ["tokio-comp", "tokio-rustls-comp", "tls-rustls-webpki-roots"], optional = true }
+serde_json = { version = "1.0", default-features = false, features = ["std"], optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.41", features = ["test-util", "rt-multi-thread", "macros", "net", "time", "io-util"] }
+tempfile = "3.13"
+proptest = { version = "1.5", default-features = false, features = ["std"] }
+assert_cmd = "2.0"
+predicates = "3.1"
+serde_json = "1.0"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+opt-level = 3
+
+# Size-optimized build for distros / `cargo install --profile release-min`.
+# ~10-20% smaller than `release` at ~5% runtime cost.
+[profile.release-min]
+inherits = "release"
+opt-level = "z"
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+missing_debug_implementations = "warn"
+missing_copy_implementations = "warn"
+unreachable_pub = "warn"
+trivial_casts = "warn"
+trivial_numeric_casts = "warn"
+unused_import_braces = "warn"
+unused_lifetimes = "warn"
+unused_qualifications = "warn"
+non_ascii_idents = "deny"
+
+[lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+print_stderr = "allow"
+print_stdout = "allow"
+multiple_crate_versions = "allow"
+module_name_repetitions = "allow"
+redundant_pub_crate = "allow"
+option_if_let_else = "allow"

@@ -1,0 +1,57 @@
+name: holdon
+description: Wait for TCP, HTTP, DNS, Postgres, Redis, or custom exec targets before running the next step.
+author: imjustprism
+branding:
+  icon: clock
+  color: orange
+
+inputs:
+  targets:
+    description: Space-separated list of holdon targets (e.g. "tcp://db:5432 https://api/health").
+    required: true
+  timeout:
+    description: Overall timeout (e.g. 60s, 5m). Forwarded to --timeout.
+    required: false
+    default: 30s
+  version:
+    description: holdon version to install (e.g. v0.1.0). Defaults to "latest".
+    required: false
+    default: latest
+  extra-args:
+    description: Extra CLI arguments appended after --timeout.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: install holdon
+      shell: bash
+      env:
+        HOLDON_VERSION: ${{ inputs.version }}
+        INSTALL_DIR: ${{ runner.temp }}/holdon-bin
+      run: |
+        set -euo pipefail
+        case "${RUNNER_OS}" in
+          Linux|macOS)
+            curl -fsSL https://raw.githubusercontent.com/imjustprism/holdon/main/install.sh | sh
+            echo "${INSTALL_DIR}" >> "$GITHUB_PATH"
+            ;;
+          Windows)
+            powershell -NoProfile -ExecutionPolicy Bypass -Command \
+              "iwr https://raw.githubusercontent.com/imjustprism/holdon/main/install.ps1 -UseBasicParsing | iex"
+            echo "${LOCALAPPDATA}\\holdon\\bin" >> "$GITHUB_PATH"
+            ;;
+          *) echo "unsupported runner OS: ${RUNNER_OS}"; exit 1 ;;
+        esac
+
+    - name: run holdon
+      shell: bash
+      env:
+        TARGETS: ${{ inputs.targets }}
+        TIMEOUT: ${{ inputs.timeout }}
+        EXTRA: ${{ inputs.extra-args }}
+      run: |
+        set -euo pipefail
+        # shellcheck disable=SC2086
+        holdon --timeout "${TIMEOUT}" ${EXTRA} ${TARGETS}

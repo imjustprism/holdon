@@ -1,0 +1,6 @@
+subject_length = 70
+subject_capitalized = false
+imperative_subject = true
+no_fixup = true
+no_wip = true
+allowed_types = ["fix", "feat", "chore", "refactor", "perf", "test", "docs", "build", "ci"]

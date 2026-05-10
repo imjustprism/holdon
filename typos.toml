@@ -1,0 +1,8 @@
+[default]
+extend-ignore-re = ["holdon"]
+
+[default.extend-words]
+crate = "crate"
+
+[files]
+extend-exclude = ["target/", "Cargo.lock", "*.svg"]

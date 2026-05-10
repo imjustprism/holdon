@@ -1,0 +1,175 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v[0-9]*.[0-9]*.[0-9]*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: tag to release (e.g. v0.1.0)
+        required: true
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  build:
+    name: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            cross: true
+            archive: tar.gz
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            cross: true
+            archive: tar.gz
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            cross: false
+            archive: tar.gz
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            cross: false
+            archive: tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            cross: false
+            archive: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            cross: false
+            archive: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: install cross
+        if: matrix.cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: build (cross)
+        if: matrix.cross
+        shell: bash
+        run: cross build --locked --release --target ${{ matrix.target }} --all-features
+
+      - name: build (cargo)
+        if: ${{ !matrix.cross }}
+        shell: bash
+        run: cargo build --locked --release --target ${{ matrix.target }} --all-features
+
+      - name: package
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          ARCHIVE: ${{ matrix.archive }}
+        run: |
+          set -euo pipefail
+          name="holdon-${TARGET}"
+          mkdir -p "dist/${name}"
+          if [[ "${TARGET}" == *windows* ]]; then
+            cp "target/${TARGET}/release/holdon.exe" "dist/${name}/"
+          else
+            cp "target/${TARGET}/release/holdon" "dist/${name}/"
+          fi
+          cp README.md LICENSE-MIT LICENSE-APACHE "dist/${name}/"
+          cd dist
+          if [[ "${ARCHIVE}" == "zip" ]]; then
+            7z a -tzip "${name}.zip" "${name}" > /dev/null
+          else
+            tar -czf "${name}.tar.gz" "${name}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: holdon-${{ matrix.target }}
+          path: dist/holdon-${{ matrix.target }}.*
+          if-no-files-found: error
+
+  sbom:
+    name: sbom
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-cyclonedx
+      - run: cargo cyclonedx --all-features --format json --override-filename holdon-sbom
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: holdon-sbom.cdx.json
+          if-no-files-found: error
+
+  release:
+    name: github release
+    needs: [build, sbom]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum holdon-* > SHA256SUMS
+
+      - name: attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/holdon-*"
+
+      - uses: sigstore/cosign-installer@v3
+      - name: cosign sign checksums
+        shell: bash
+        env:
+          COSIGN_YES: "true"
+        run: |
+          cd dist
+          cosign sign-blob --yes --output-signature SHA256SUMS.sig --output-certificate SHA256SUMS.pem SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          draft: true
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+
+  publish:
+    name: publish to crates.io
+    needs: release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo publish --locked --all-features
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

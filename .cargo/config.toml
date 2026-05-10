@@ -1,0 +1,13 @@
+[build]
+rustflags = []
+
+[term]
+color = "always"
+
+[net]
+retry = 10
+
+[alias]
+ci = "fmt --all --check"
+lints = "clippy --all-targets --all-features --locked -- -D warnings"
+xtest = "test --all-features --locked --no-fail-fast"

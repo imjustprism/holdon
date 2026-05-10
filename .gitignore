@@ -1,0 +1,33 @@
+/target
+Cargo.lock.bak
+
+# project-local agent rules, not for upstream
+/.rules
+
+# editors
+*.swp
+*.swo
+.vscode/
+.idea/
+*.iml
+
+# os
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# secrets / env
+.env
+.env.*
+!.env.example
+
+# build artifacts
+*.pdb
+*.dSYM/
+*.profraw
+
+# logs / scratch
+*.log
+tmp/
+.tmp/
+.scratch/
