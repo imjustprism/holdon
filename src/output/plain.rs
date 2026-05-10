@@ -446,9 +446,7 @@ fn sparkline(values: &[Duration], blocks: &[char]) -> String {
 }
 
 fn terminal_width() -> usize {
-    terminal::size()
-        .map(|(c, _)| c as usize)
-        .unwrap_or(DEFAULT_TERMINAL_WIDTH)
+    terminal::size().map_or(DEFAULT_TERMINAL_WIDTH, |(c, _)| c as usize)
 }
 
 fn truncate_to<'a>(s: &'a str, max: usize, ellipsis: &str) -> Cow<'a, str> {

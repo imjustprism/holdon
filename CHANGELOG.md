@@ -6,6 +6,23 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-05-11
+
+### Fixed
+
+- `file://` parser refuses raw `file:////...` prefixes on all platforms, not
+  just Windows (UNC normalization in the `url` crate was hiding the case on
+  Linux and macOS).
+- Clippy `map_unwrap_or` lint on Rust 1.95+ in the terminal-width helper.
+- CI: `cargo-deny` allows `CDLA-Permissive-2.0` (webpki-roots license) and
+  ignores `RUSTSEC-2025-0134` (rustls-pemfile unmaintained).
+- Release workflow: SBOM path glob matches per-crate cyclonedx output.
+- Release workflow: Docker image build + push to `ghcr.io`.
+
+### Yanked
+
+- `0.1.0` was yanked from crates.io. Use `0.1.1` or later.
+
 ## [0.1.0] - 2026-05-10
 
 ### Added
@@ -39,5 +56,6 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `--insecure` emits a stderr warning on every run
 - Stdin target ingest capped at 10 000 entries and 2 KiB per string
 
-[Unreleased]: https://github.com/imjustprism/holdon/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/imjustprism/holdon/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/imjustprism/holdon/releases/tag/v0.1.1
 [0.1.0]: https://github.com/imjustprism/holdon/releases/tag/v0.1.0

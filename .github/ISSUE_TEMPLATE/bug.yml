@@ -1,0 +1,53 @@
+name: Bug report
+description: Something does not work as documented.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: holdon version
+      description: Output of `holdon --version`.
+      placeholder: holdon 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Linux (gnu)
+        - Linux (musl)
+        - macOS (Intel)
+        - macOS (Apple Silicon)
+        - Windows
+        - Docker
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: The exact `holdon` invocation that misbehaved.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the exit code and stderr output if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Logs, screenshots, related issues, hypotheses.
