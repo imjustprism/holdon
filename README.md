@@ -4,7 +4,7 @@
 [![docs.rs](https://img.shields.io/docsrs/holdon)](https://docs.rs/holdon)
 [![CI](https://github.com/imjustprism/holdon/actions/workflows/ci.yml/badge.svg)](https://github.com/imjustprism/holdon/actions/workflows/ci.yml)
 [![MSRV](https://img.shields.io/badge/rust-1.85+-blue.svg)](https://blog.rust-lang.org/)
-[![license](https://img.shields.io/crates/l/holdon.svg)](#license)
+[![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
 > Wait for anything. Know why if it doesn't.
 
