@@ -117,10 +117,20 @@ jobs:
         with:
           tool: cargo-cyclonedx
       - run: cargo cyclonedx --all-features --format json --override-filename holdon-sbom
+      - name: locate sbom
+        shell: bash
+        run: |
+          set -euo pipefail
+          path="$(find . -name 'holdon-sbom*.json' -print -quit)"
+          if [[ -z "${path}" ]]; then
+            echo "no sbom file produced"; exit 1
+          fi
+          mkdir -p sbom-out
+          cp "${path}" sbom-out/holdon-sbom.cdx.json
       - uses: actions/upload-artifact@v4
         with:
           name: sbom
-          path: holdon-sbom.cdx.json
+          path: sbom-out/holdon-sbom.cdx.json
           if-no-files-found: error
 
   release:
