@@ -118,8 +118,18 @@ fn client() -> &'static Client {
             b = b.danger_accept_invalid_certs(true);
         }
         for pem in &cfg.extra_ca_pem {
-            if let Ok(cert) = Certificate::from_pem(pem) {
-                b = b.add_root_certificate(cert);
+            match Certificate::from_pem_bundle(pem) {
+                Ok(certs) if certs.is_empty() => {
+                    eprintln!("holdon: --ca-cert bundle contained no certificates");
+                }
+                Ok(certs) => {
+                    for cert in certs {
+                        b = b.add_root_certificate(cert);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("holdon: failed to parse --ca-cert bundle: {e}");
+                }
             }
         }
         b.build().unwrap_or_else(|_| Client::new())
