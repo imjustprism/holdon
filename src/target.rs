@@ -292,6 +292,13 @@ impl FromStr for Target {
 
     #[allow(clippy::too_many_lines)]
     fn from_str(input: &str) -> Result<Self> {
+        let lower = input.to_ascii_lowercase();
+        if lower.starts_with("file:////") || lower.starts_with("file:\\\\") {
+            return Err(parse_err(
+                input,
+                "remote/UNC file paths are refused (NTLM-relay risk)",
+            ));
+        }
         if let Some(rest) = input.strip_prefix(':') {
             if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()) {
                 let port = parse_port(rest, input)?;
