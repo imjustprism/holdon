@@ -209,7 +209,7 @@ jobs:
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "semver=${tag#v}" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           push: true
