@@ -56,6 +56,7 @@ holdon exec:///usr/local/bin/check.sh     # custom readiness command
 | `dns://`                        | Hostname resolves                         |
 | `file:///path`                  | Path exists (`?mode=absent` inverse)      |
 | `postgres://`, `postgresql://`  | Connect + `SELECT 1` (TLS by default)     |
+| `mysql://`, `mariadb://`        | Connect + `SELECT 1` (TLS by default)     |
 | `redis://`, `rediss://`         | Connect + `PING` (`rediss://` for TLS)    |
 | `exec://program?arg=...`        | External command, ready iff exit `0`      |
 
@@ -68,6 +69,7 @@ are opt-in to keep the default binary small.
 | --------------- | ------------------------------------------ |
 | `http`          | HTTP / HTTPS probes (rustls)               |
 | `postgres`      | Postgres probe via `tokio-postgres` + rustls |
+| `mysql`         | `MySQL` / `MariaDB` probe via `mysql_async` + rustls |
 | `redis`         | Redis probe via `redis` crate + rustls     |
 | `json-output`   | `--output json` line-delimited events      |
 | `all-databases` | `postgres` + `redis`                       |

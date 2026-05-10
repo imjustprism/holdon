@@ -13,6 +13,8 @@ mod file;
 mod hint;
 #[cfg(feature = "http")]
 pub mod http;
+#[cfg(feature = "mysql")]
+mod mysql;
 #[cfg(feature = "postgres")]
 mod postgres;
 #[cfg(feature = "redis")]
@@ -64,6 +66,9 @@ impl Target {
             Self::Redis { url } => redis::probe(url, ctx).await,
             #[cfg(not(feature = "redis"))]
             Self::Redis { .. } => disabled_stage(StageKind::Redis, "redis"),
+            #[cfg(feature = "mysql")]
+            Self::Mysql { url } => mysql::probe(url, ctx).await,
+            #[cfg(not(feature = "mysql"))]
             Self::Mysql { .. } => disabled_stage(StageKind::Mysql, "mysql"),
             Self::Exec { program, args } => exec::probe(program, args, ctx).await,
         };

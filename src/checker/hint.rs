@@ -22,6 +22,14 @@ pub(crate) mod hints {
     pub(crate) const REDIS_CLUSTER: &str = "cluster topology not yet stable";
     pub(crate) const REDIS_TLS: &str =
         "TLS handshake failed, check rediss:// scheme and server certificate";
+    pub(crate) const MYSQL_NOT_READY: &str = "server not accepting connections yet";
+    pub(crate) const MYSQL_AUTH: &str = "check credentials in the connection URL";
+    pub(crate) const MYSQL_NO_DB: &str =
+        "database does not exist or user lacks access (still initializing?)";
+    pub(crate) const MYSQL_TLS: &str =
+        "TLS negotiation failed, pass ?ssl-mode=disable for plaintext or check the server cert";
+    pub(crate) const MYSQL_HOST_BLOCKED: &str =
+        "server blocked this host (too many connection errors); FLUSH HOSTS on the server";
     pub(crate) const HTTP_RETRY: &str = "service may still be initializing";
     pub(crate) const DNS_HINT: &str = "check hostname spelling and DNS server";
     pub(crate) const FILE_IO: &str = "permission or IO error reading the path";
@@ -87,6 +95,26 @@ impl Hintable for tokio_postgres::Error {
             return Some(hints::PG_RECOVERY);
         }
         None
+    }
+}
+
+#[cfg(feature = "mysql")]
+impl Hintable for mysql_async::Error {
+    fn hint(&self) -> Option<&'static str> {
+        let s = self.to_string().to_ascii_lowercase();
+        if s.contains("access denied") || s.contains("authentication") {
+            Some(hints::MYSQL_AUTH)
+        } else if s.contains("unknown database") {
+            Some(hints::MYSQL_NO_DB)
+        } else if s.contains("ssl") || s.contains("tls") || s.contains("certificate") {
+            Some(hints::MYSQL_TLS)
+        } else if s.contains("host") && s.contains("blocked") {
+            Some(hints::MYSQL_HOST_BLOCKED)
+        } else if s.contains("connection refused") || s.contains("server has gone away") {
+            Some(hints::MYSQL_NOT_READY)
+        } else {
+            None
+        }
     }
 }
 
