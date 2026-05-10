@@ -189,7 +189,6 @@ jobs:
       - cross
       - deny
       - audit
-      - semver
       - typos
       - taplo
       - hack

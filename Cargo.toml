@@ -10,14 +10,14 @@ readme = "README.md"
 keywords = ["wait", "cli", "docker", "ci", "healthcheck"]
 categories = ["command-line-utilities", "network-programming"]
 include = [
-    "/src",
-    "/Cargo.toml",
-    "/Cargo.lock",
-    "/README.md",
-    "/CHANGELOG.md",
-    "/LICENSE-MIT",
-    "/LICENSE-APACHE",
-    "/examples",
+  "/src",
+  "/Cargo.toml",
+  "/Cargo.lock",
+  "/README.md",
+  "/CHANGELOG.md",
+  "/LICENSE-MIT",
+  "/LICENSE-APACHE",
+  "/examples",
 ]
 
 [package.metadata.docs.rs]
@@ -42,8 +42,27 @@ all-databases = ["postgres", "redis"]
 full = ["http", "postgres", "redis", "json-output"]
 
 [dependencies]
-tokio = { version = "1.41", default-features = false, features = ["rt", "macros", "net", "time", "process", "io-util", "signal", "fs", "sync"] }
-clap = { version = "4.5", default-features = false, features = ["derive", "std", "help", "usage", "error-context", "suggestions", "color", "env"] }
+tokio = { version = "1.41", default-features = false, features = [
+  "rt",
+  "macros",
+  "net",
+  "time",
+  "process",
+  "io-util",
+  "signal",
+  "fs",
+  "sync",
+] }
+clap = { version = "4.5", default-features = false, features = [
+  "derive",
+  "std",
+  "help",
+  "usage",
+  "error-context",
+  "suggestions",
+  "color",
+  "env",
+] }
 thiserror = { version = "2.0", default-features = false }
 anyhow = { version = "1.0", default-features = false, features = ["std"] }
 owo-colors = { version = "4.1", default-features = false, features = ["supports-colors"] }
@@ -52,12 +71,19 @@ fastrand = { version = "2.1", default-features = false, features = ["std"] }
 url = { version = "2.5", default-features = false, features = ["std"] }
 tracing = { version = "0.1", default-features = false, features = ["std", "attributes"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "http2"], optional = true }
+reqwest = { version = "0.12", default-features = false, features = [
+  "rustls-tls-webpki-roots",
+  "http2",
+], optional = true }
 tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"], optional = true }
 tokio-postgres-rustls = { version = "0.13", default-features = false, optional = true }
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"], optional = true }
 webpki-roots = { version = "0.26", optional = true }
-redis = { version = "0.27", default-features = false, features = ["tokio-comp", "tokio-rustls-comp", "tls-rustls-webpki-roots"], optional = true }
+redis = { version = "0.27", default-features = false, features = [
+  "tokio-comp",
+  "tokio-rustls-comp",
+  "tls-rustls-webpki-roots",
+], optional = true }
 serde_json = { version = "1.0", default-features = false, features = ["std"], optional = true }
 
 [dev-dependencies]
