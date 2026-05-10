@@ -6,6 +6,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- MySQL / MariaDB probe (`mysql://`, `mariadb://`) via `mysql_async` with
+  rustls TLS by default. Opt out with `?ssl-mode=disable`. Behind the new
+  `mysql` cargo feature. `all-databases` and `full` features include it.
+- Mysql-specific operator hints for auth failure, missing database, TLS
+  handshake failure, host-blocked, and not-ready states.
+
 ## [0.1.1] - 2026-05-11
 
 ### Fixed

@@ -114,8 +114,8 @@ pub enum Target {
         /// Full Redis connection URL.
         url: Url,
     },
-    /// Reserved for `mysql://`. Probing returns a stub error until the
-    /// `MySQL` checker is implemented.
+    /// `MySQL` / `MariaDB` connect + `SELECT 1`. TLS by default (rustls), opt
+    /// out with `?ssl-mode=disable`. Behind the `mysql` feature.
     Mysql {
         /// Full `MySQL` connection URL.
         url: Url,
@@ -370,7 +370,7 @@ impl FromStr for Target {
             }),
             "postgres" | "postgresql" => Ok(Self::Postgres { url }),
             "redis" | "rediss" => Ok(Self::Redis { url }),
-            "mysql" => Ok(Self::Mysql { url }),
+            "mysql" | "mariadb" => Ok(Self::Mysql { url }),
             "dns" => {
                 let host = url
                     .host_str()
