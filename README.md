@@ -52,7 +52,7 @@ holdon exec:///usr/local/bin/check.sh     # custom readiness command
 | Scheme                          | What it checks                            |
 | ------------------------------- | ----------------------------------------- |
 | `tcp://`, `:port`, `host:port`  | DNS resolve, TCP connect                  |
-| `http://`, `https://`           | TCP, TLS, HTTP request (`-H`, `--method`, `--expect-body`, `--ca-cert`, `--tls-min`) |
+| `http://`, `https://`           | TCP, TLS, HTTP request (`-H`, `--method`, `--expect-body`, `--no-follow-redirects`, `--ca-cert`, `--tls-min`) |
 | `dns://`                        | Hostname resolves                         |
 | `file:///path`                  | Path exists (`?mode=absent` inverse)      |
 | `postgres://`, `postgresql://`  | Connect + `SELECT 1` (TLS by default)     |
