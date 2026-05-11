@@ -39,6 +39,9 @@ pub(crate) mod hints {
     pub(crate) const GRPC_AUTH: &str = "missing or invalid credentials for the health endpoint";
     pub(crate) const GRPC_TLS: &str =
         "TLS handshake failed for grpcs://; verify server cert and SNI";
+    pub(crate) const GRPC_UNAVAILABLE: &str = "server transient unavailable; will keep retrying";
+    pub(crate) const GRPC_DEADLINE: &str =
+        "server did not respond in time; raise --attempt-timeout";
     pub(crate) const HTTP_RETRY: &str = "service may still be initializing";
     pub(crate) const HTTP_BODY_MISMATCH: &str =
         "response status was acceptable but the body did not match --expect-body";

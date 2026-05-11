@@ -391,6 +391,12 @@ impl FromStr for Target {
             "redis" | "rediss" => Ok(Self::Redis { url }),
             "mysql" | "mariadb" => Ok(Self::Mysql { url }),
             "grpc" | "grpcs" => {
+                let host = url
+                    .host_str()
+                    .ok_or_else(|| parse_err(input, "missing host"))?;
+                Hostname::new(host)?;
+                url.port_or_known_default()
+                    .ok_or_else(|| Error::MissingPort(input.into()))?;
                 let raw = url.path().trim_start_matches('/').trim_end_matches('/');
                 let service = if raw.is_empty() {
                     String::new()
@@ -730,5 +736,11 @@ mod tests {
             Target::Grpc { service, .. } => assert_eq!(service, "svc"),
             _ => panic!("expected Grpc"),
         }
+    }
+
+    #[test]
+    fn grpc_missing_port_rejected() {
+        assert!("grpc://localhost".parse::<Target>().is_err());
+        assert!("grpcs://api.example.com/svc".parse::<Target>().is_err());
     }
 }

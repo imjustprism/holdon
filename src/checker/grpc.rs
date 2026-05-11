@@ -80,7 +80,8 @@ fn rpc_failure_stage(status: &Status, start: Instant) -> Stage {
     let hint = match status.code() {
         Code::Unimplemented => Some(hints::GRPC_UNIMPLEMENTED),
         Code::NotFound => Some(hints::GRPC_SERVICE_UNKNOWN),
-        Code::Unavailable | Code::DeadlineExceeded => Some(hints::PG_NOT_READY),
+        Code::Unavailable => Some(hints::GRPC_UNAVAILABLE),
+        Code::DeadlineExceeded => Some(hints::GRPC_DEADLINE),
         Code::Unauthenticated | Code::PermissionDenied => Some(hints::GRPC_AUTH),
         _ => None,
     };
@@ -144,7 +145,6 @@ fn build_endpoint(url: &Url, ctx: AttemptCtx) -> Result<Endpoint, ProbeError> {
         .ok_or_else(|| ProbeError::Rpc(Box::new(Status::invalid_argument("missing host"))))?;
     let port = url
         .port_or_known_default()
-        .or(if want_tls { Some(443) } else { Some(80) })
         .ok_or_else(|| ProbeError::Rpc(Box::new(Status::invalid_argument("missing port"))))?;
     let scheme = if want_tls { "https" } else { "http" };
     let uri = format!("{scheme}://{host}:{port}");
