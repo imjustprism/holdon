@@ -36,6 +36,23 @@ hint: service may still be initializing
 
 Minimum supported Rust version: **1.85**.
 
+## Config file
+
+Pass `--config holdon.toml`, or drop `holdon.toml` / `.holdon.toml` next to where you run `holdon` and it's auto-detected.
+
+```toml
+interval = "200ms"
+timeout = "60s"
+success_threshold = 2
+
+targets = [
+  "tcp://db:5432",
+  "https://api.local/health",
+]
+```
+
+Explicit CLI flags always win over the config file. See [`examples/holdon.toml`](https://github.com/imjustprism/holdon/tree/main/examples/holdon.toml).
+
 ## Quickstart
 
 ```sh

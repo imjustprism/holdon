@@ -1,4 +1,5 @@
 mod cli;
+mod config;
 mod output;
 
 use std::process::{ExitCode, Stdio};
@@ -66,7 +67,10 @@ async fn main() -> ExitCode {
 
 #[allow(clippy::too_many_lines)]
 async fn run(args: Args) -> Result<ExitStatus> {
-    let raw_targets = collect_target_inputs(&args.targets)?;
+    let config_data = config::load(args.config.as_deref())?;
+
+    let mut raw_targets = collect_target_inputs(&args.targets)?;
+    append_config_targets(&mut raw_targets, &config_data.targets)?;
     let mut targets: Vec<Target> = raw_targets
         .iter()
         .map(|s| {
@@ -114,17 +118,54 @@ async fn run(args: Args) -> Result<ExitStatus> {
         bail!("no targets given");
     }
 
+    // CLI > config file > hardcoded default. A CLI value equal to the
+    // hardcoded default is treated as "unset" so the config file can override.
+    let merge_dur = |cli: Duration, cli_default: Duration, conf: Option<Duration>| -> Duration {
+        if cli == cli_default {
+            conf.unwrap_or(cli)
+        } else {
+            cli
+        }
+    };
     let cfg = RunnerConfig::default()
-        .timeout(args.timeout)
-        .interval(args.interval)
-        .max_interval(args.max_interval)
-        .initial_delay(args.initial_delay)
-        .attempt_timeout(args.attempt_timeout)
-        .reverse(args.reverse)
-        .once(args.once)
-        .sequential(args.sequential)
-        .success_threshold(args.success_threshold)
-        .jitter(!args.no_jitter);
+        .timeout(merge_dur(
+            args.timeout,
+            RunnerConfig::DEFAULT_OVERALL_TIMEOUT,
+            config_data.timeout,
+        ))
+        .interval(merge_dur(
+            args.interval,
+            RunnerConfig::DEFAULT_INITIAL_INTERVAL,
+            config_data.interval,
+        ))
+        .max_interval(merge_dur(
+            args.max_interval,
+            RunnerConfig::DEFAULT_MAX_INTERVAL,
+            config_data.max_interval,
+        ))
+        .initial_delay(merge_dur(
+            args.initial_delay,
+            RunnerConfig::DEFAULT_INITIAL_DELAY,
+            config_data.initial_delay,
+        ))
+        .attempt_timeout(merge_dur(
+            args.attempt_timeout,
+            RunnerConfig::DEFAULT_ATTEMPT_TIMEOUT,
+            config_data.attempt_timeout,
+        ))
+        .reverse(args.reverse || config_data.reverse.unwrap_or(false))
+        .once(args.once || config_data.once.unwrap_or(false))
+        .sequential(args.sequential || config_data.sequential.unwrap_or(false))
+        .success_threshold(
+            if args.success_threshold == RunnerConfig::DEFAULT_SUCCESS_THRESHOLD {
+                config_data
+                    .success_threshold
+                    .unwrap_or(args.success_threshold)
+            } else {
+                args.success_threshold
+            },
+        )
+        .jitter(!args.no_jitter && config_data.jitter.unwrap_or(true));
 
     let no_color_env = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
     let color =
@@ -183,7 +224,8 @@ async fn run(args: Args) -> Result<ExitStatus> {
 
     printer.summary(&report, exec_slice);
 
-    let ready = if let Some(n) = args.at_least {
+    let at_least = args.at_least.or(config_data.at_least);
+    let ready = if let Some(n) = at_least {
         report.results.iter().filter(|r| r.satisfied).count() >= n.max(1)
     } else {
         report.all_ready()
@@ -246,19 +288,20 @@ pub(crate) const MAX_TARGETS: usize = 10_000;
 pub(crate) const MAX_TARGET_LEN: usize = 2048;
 const UTF8_BOM: &str = "\u{feff}";
 
+fn push_validated(out: &mut Vec<String>, s: String) -> Result<()> {
+    if s.len() > MAX_TARGET_LEN {
+        bail!("target string exceeds {MAX_TARGET_LEN} bytes");
+    }
+    if out.len() >= MAX_TARGETS {
+        bail!("too many targets (max {MAX_TARGETS})");
+    }
+    out.push(s);
+    Ok(())
+}
+
 fn collect_target_inputs(args: &[String]) -> Result<Vec<String>> {
     use std::io::BufRead;
     let mut out = Vec::with_capacity(args.len());
-    let mut push = |s: String| -> Result<()> {
-        if s.len() > MAX_TARGET_LEN {
-            bail!("target string exceeds {MAX_TARGET_LEN} bytes");
-        }
-        if out.len() >= MAX_TARGETS {
-            bail!("too many targets (max {MAX_TARGETS})");
-        }
-        out.push(s);
-        Ok(())
-    };
     for a in args {
         if a == "-" {
             let stdin = std::io::stdin();
@@ -273,14 +316,21 @@ fn collect_target_inputs(args: &[String]) -> Result<Vec<String>> {
                 }
                 let trimmed = line.trim();
                 if !trimmed.is_empty() && !trimmed.starts_with('#') {
-                    push(trimmed.to_owned())?;
+                    push_validated(&mut out, trimmed.to_owned())?;
                 }
             }
         } else {
-            push(a.clone())?;
+            push_validated(&mut out, a.clone())?;
         }
     }
     Ok(out)
+}
+
+fn append_config_targets(out: &mut Vec<String>, config_targets: &[String]) -> Result<()> {
+    for t in config_targets {
+        push_validated(out, t.clone())?;
+    }
+    Ok(())
 }
 
 #[cfg(windows)]

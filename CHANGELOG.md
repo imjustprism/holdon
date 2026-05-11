@@ -8,6 +8,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- TOML configuration file via `--config <PATH>` (or env `HOLDON_CONFIG`).
+  Auto-detects `holdon.toml` / `.holdon.toml` in the current directory when
+  no flag is given. Supports global defaults (`interval`, `timeout`,
+  `max_interval`, `initial_delay`, `attempt_timeout`, `success_threshold`,
+  `jitter`, `sequential`, `reverse`, `once`, `at_least`) plus a `targets`
+  array that is appended to CLI targets. Explicit CLI flags win over the
+  config file.
 - HTTP `--expect-body <SUBSTRING>` to require a literal substring in the
   response body. Body is capped at 1 MiB.
 - HTTP `--no-follow-redirects` to disable redirect following.
