@@ -115,12 +115,15 @@ fn prepare(url: &Url) -> Result<(Url, Option<u8>), String> {
     let mut target =
         Url::parse(&rewritten).map_err(|e| format!("failed to rewrite influxdb:// URL: {e}"))?;
     target.set_query(None);
-    target.set_path(PING_PATH);
+    let prefix = target.path().trim_end_matches('/');
+    target.set_path(&format!("{prefix}{PING_PATH}"));
     Ok((target, want_version))
 }
 
 fn version_matches(reported: &str, want_major: u8) -> bool {
     reported
+        .strip_prefix('v')
+        .unwrap_or(reported)
         .split('.')
         .next()
         .and_then(|s| s.parse::<u8>().ok())
@@ -141,10 +144,28 @@ mod tests {
     }
 
     #[test]
+    fn version_matches_strips_v_prefix() {
+        assert!(version_matches("v2.7.3", 2));
+        assert!(version_matches("v1.8", 1));
+    }
+
+    #[test]
+    fn prepare_preserves_path_prefix() {
+        let u: Url = "influxdb://host:8086/proxy".parse().unwrap();
+        let (out, _) = prepare(&u).unwrap();
+        assert_eq!(out.path(), "/proxy/ping");
+    }
+
+    #[test]
+    fn prepare_trims_trailing_slash_in_prefix() {
+        let u: Url = "influxdb://host:8086/proxy/".parse().unwrap();
+        let (out, _) = prepare(&u).unwrap();
+        assert_eq!(out.path(), "/proxy/ping");
+    }
+
+    #[test]
     fn prepare_rewrites_to_http_and_strips_query() {
-        let u: Url = "influxdb://host:8086/path?expect-version=2"
-            .parse()
-            .unwrap();
+        let u: Url = "influxdb://host:8086?expect-version=2".parse().unwrap();
         let (out, want) = prepare(&u).unwrap();
         assert_eq!(out.scheme(), "http");
         assert_eq!(out.path(), PING_PATH);

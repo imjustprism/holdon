@@ -455,6 +455,25 @@ impl FromStr for Target {
                 Hostname::new(host)?;
                 url.port_or_known_default()
                     .ok_or_else(|| Error::MissingPort(input.into()))?;
+                for (k, v) in url.query_pairs() {
+                    if k.eq_ignore_ascii_case("expect-version") {
+                        if v.as_ref() != "1" && v.as_ref() != "2" {
+                            return Err(parse_err(
+                                input,
+                                &format!(
+                                    "influxdb:// expect-version `{v}` invalid (only `1` or `2`)"
+                                ),
+                            ));
+                        }
+                    } else {
+                        return Err(parse_err(
+                            input,
+                            &format!(
+                                "unknown influxdb:// query key `{k}` (only `expect-version` supported)"
+                            ),
+                        ));
+                    }
+                }
                 Ok(Self::Influxdb { url })
             }
             "grpc" | "grpcs" => {
@@ -938,5 +957,46 @@ mod tests {
                 .parse::<Target>()
                 .is_err()
         );
+    }
+
+    #[test]
+    fn influxdb_plain_parses() {
+        let t: Target = "influxdb://localhost:8086".parse().unwrap();
+        assert!(matches!(t, Target::Influxdb { .. }));
+    }
+
+    #[test]
+    fn influxdb_tls_parses() {
+        let t: Target = "influxdbs://h:8086".parse().unwrap();
+        assert!(matches!(t, Target::Influxdb { .. }));
+    }
+
+    #[test]
+    fn influxdb_with_valid_version_parses() {
+        let t: Target = "influxdb://h:8086?expect-version=2".parse().unwrap();
+        assert!(matches!(t, Target::Influxdb { .. }));
+    }
+
+    #[test]
+    fn influxdb_rejects_bad_version_at_parse() {
+        assert!(
+            "influxdb://h:8086?expect-version=3"
+                .parse::<Target>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn influxdb_rejects_unknown_query_at_parse() {
+        assert!(
+            "influxdb://h:8086?bucket=metrics"
+                .parse::<Target>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn influxdb_missing_port_rejected() {
+        assert!("influxdb://localhost".parse::<Target>().is_err());
     }
 }
