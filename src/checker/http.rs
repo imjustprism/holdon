@@ -26,6 +26,9 @@ const FAILURE_BODY_SNIPPET_BYTES: usize = 240;
 /// Response headers whose values are shown verbatim on failure to help
 /// identify the upstream server.
 const SERVER_HINT_HEADERS: &[&str] = &["server", "x-powered-by", "via"];
+/// Maximum visible characters for a single upstream-identification header
+/// value. Long `Via:` chains or verbose `Server:` strings get truncated.
+const SERVER_HINT_VALUE_MAX: usize = 80;
 
 /// Minimum TLS protocol version accepted by HTTPS probes.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -218,9 +221,17 @@ fn upstream_hint(headers: &HeaderMap) -> Option<String> {
         if let Some(value) = headers.get(*name).and_then(|v| v.to_str().ok()) {
             let cleaned = crate::util::sanitize_for_terminal(value);
             let trimmed = cleaned.trim();
-            if !trimmed.is_empty() {
-                parts.push(format!("{name}: {trimmed}"));
+            if trimmed.is_empty() {
+                continue;
             }
+            let bounded = if trimmed.chars().count() > SERVER_HINT_VALUE_MAX {
+                let mut t: String = trimmed.chars().take(SERVER_HINT_VALUE_MAX).collect();
+                t.push('…');
+                t
+            } else {
+                trimmed.to_owned()
+            };
+            parts.push(format!("{name}: {bounded}"));
         }
     }
     if parts.is_empty() {
@@ -231,7 +242,7 @@ fn upstream_hint(headers: &HeaderMap) -> Option<String> {
 }
 
 async fn read_body_snippet(resp: reqwest::Response) -> String {
-    let raw = read_body_capped_to(resp, FAILURE_BODY_SNIPPET_BYTES * 4)
+    let raw = read_body_to(resp, FAILURE_BODY_SNIPPET_BYTES * 4)
         .await
         .unwrap_or_default();
     if raw.is_empty() {
@@ -260,24 +271,11 @@ async fn read_body_snippet(resp: reqwest::Response) -> String {
     out
 }
 
-async fn read_body_capped_to(mut resp: reqwest::Response, cap: usize) -> reqwest::Result<String> {
-    let mut buf = Vec::with_capacity(4096);
-    while let Some(bytes) = resp.chunk().await? {
-        let remaining = cap.saturating_sub(buf.len());
-        if remaining == 0 {
-            break;
-        }
-        let take = bytes.len().min(remaining);
-        buf.extend_from_slice(&bytes[..take]);
-        if take < bytes.len() {
-            break;
-        }
-    }
-    Ok(String::from_utf8_lossy(&buf).into_owned())
+async fn read_body_capped(resp: reqwest::Response) -> reqwest::Result<String> {
+    read_body_to(resp, usize::try_from(MAX_BODY_BYTES).unwrap_or(usize::MAX)).await
 }
 
-async fn read_body_capped(mut resp: reqwest::Response) -> reqwest::Result<String> {
-    let cap = usize::try_from(MAX_BODY_BYTES).unwrap_or(usize::MAX);
+async fn read_body_to(mut resp: reqwest::Response, cap: usize) -> reqwest::Result<String> {
     let mut buf = Vec::with_capacity(4096);
     while let Some(bytes) = resp.chunk().await? {
         let remaining = cap.saturating_sub(buf.len());
