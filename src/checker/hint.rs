@@ -61,6 +61,12 @@ pub(crate) mod hints {
         "pattern not yet in log, app may still be starting; will keep checking";
     pub(crate) const LOG_PATH: &str =
         "log file is missing, check the path and that the producer has started writing";
+    pub(crate) const INFLUXDB_NOT_READY: &str =
+        "influxdb server slow or not yet listening on the ping endpoint";
+    pub(crate) const INFLUXDB_VERSION: &str =
+        "server major version did not match expect-version, check the target server";
+    pub(crate) const INFLUXDB_PARSE: &str =
+        "fix the influxdb:// URL, only ?expect-version=1|2 is supported";
 }
 
 impl Hintable for std::io::Error {

@@ -108,6 +108,11 @@ fn config() -> &'static HttpConfig {
     CONFIG.get_or_init(HttpConfig::defaults)
 }
 
+#[cfg(feature = "influxdb")]
+pub(crate) fn raw_client() -> &'static Client {
+    client()
+}
+
 fn client() -> &'static Client {
     CLIENT.get_or_init(|| {
         let cfg = config();
