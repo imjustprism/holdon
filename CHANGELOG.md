@@ -8,6 +8,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- HTTP probe surfaces a sanitized body snippet (up to 240 chars) and the
+  upstream `Server` / `X-Powered-By` / `Via` headers when the response
+  status falls outside the expected range. Output now reads
+  `status 503 [server: nginx/1.27]: {"error":"db not ready"}` instead of
+  the bare `status 503`. Helps answer the "why is it 5xx?" question
+  without an extra `curl -v`.
+
+### Added
+
 - gRPC `Health/Check` probe via `tonic` + rustls. URL forms `grpc://host:port`
   or `grpcs://host:port` for TLS, with optional `/Service` path to select a
   specific service. Behind the `mysql`-style `grpc` cargo feature, bundled in

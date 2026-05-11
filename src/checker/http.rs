@@ -3,6 +3,8 @@ use std::time::Instant;
 
 pub use reqwest::Method;
 pub use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use std::fmt::Write as _;
+
 use reqwest::redirect::Policy;
 use reqwest::tls::Version as TlsVersion;
 use reqwest::{Certificate, Client};
@@ -18,6 +20,15 @@ use crate::util::{format_error_chain, redact_in};
 /// larger than this are truncated. Healthchecks rarely return more than a few
 /// KiB so a 1 MiB ceiling is generous and bounds memory.
 const MAX_BODY_BYTES: u64 = 1_024 * 1_024;
+/// Maximum bytes of response body kept for the diagnostic snippet shown on
+/// status mismatch. Small enough to keep stage messages readable.
+const FAILURE_BODY_SNIPPET_BYTES: usize = 240;
+/// Response headers whose values are shown verbatim on failure to help
+/// identify the upstream server.
+const SERVER_HINT_HEADERS: &[&str] = &["server", "x-powered-by", "via"];
+/// Maximum visible characters for a single upstream-identification header
+/// value. Long `Via:` chains or verbose `Server:` strings get truncated.
+const SERVER_HINT_VALUE_MAX: usize = 80;
 
 /// Minimum TLS protocol version accepted by HTTPS probes.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -148,10 +159,23 @@ pub(super) async fn probe(url: &Url, expect: &StatusRange, ctx: AttemptCtx) -> V
         Ok(resp) => {
             let status = resp.status().as_u16();
             if !expect.contains(status) {
+                let server_tag = upstream_hint(resp.headers());
+                let snippet = read_body_snippet(resp).await;
+                let mut msg = format!("status {status}");
+                if let Some(tag) = server_tag {
+                    let _ = write!(msg, " [{tag}]");
+                }
+                if !snippet.is_empty() {
+                    msg.push_str(": ");
+                    msg.push_str(&snippet);
+                }
+                if !pw.is_empty() {
+                    msg = redact_in(&msg, &pw);
+                }
                 err_stage(
                     StageKind::Http,
                     start.elapsed(),
-                    format!("status {status}"),
+                    msg,
                     Some(hints::HTTP_RETRY),
                 )
             } else if let Some(needle) = cfg.body_substring.as_deref() {
@@ -194,8 +218,67 @@ pub(super) async fn probe(url: &Url, expect: &StatusRange, ctx: AttemptCtx) -> V
     vec![stage]
 }
 
-async fn read_body_capped(mut resp: reqwest::Response) -> reqwest::Result<String> {
-    let cap = usize::try_from(MAX_BODY_BYTES).unwrap_or(usize::MAX);
+fn upstream_hint(headers: &HeaderMap) -> Option<String> {
+    let mut parts = Vec::new();
+    for name in SERVER_HINT_HEADERS {
+        if let Some(value) = headers.get(*name).and_then(|v| v.to_str().ok()) {
+            let cleaned = crate::util::sanitize_for_terminal(value);
+            let trimmed = cleaned.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let bounded = if trimmed.chars().count() > SERVER_HINT_VALUE_MAX {
+                let mut t: String = trimmed.chars().take(SERVER_HINT_VALUE_MAX).collect();
+                t.push('…');
+                t
+            } else {
+                trimmed.to_owned()
+            };
+            parts.push(format!("{name}: {bounded}"));
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(", "))
+    }
+}
+
+async fn read_body_snippet(resp: reqwest::Response) -> String {
+    let raw = read_body_to(resp, FAILURE_BODY_SNIPPET_BYTES * 4)
+        .await
+        .unwrap_or_default();
+    if raw.is_empty() {
+        return String::new();
+    }
+    let cleaned = crate::util::sanitize_for_terminal(&raw);
+    let mut compact = String::with_capacity(cleaned.len());
+    let mut prev_ws = false;
+    for ch in cleaned.chars() {
+        if ch.is_whitespace() {
+            if !prev_ws {
+                compact.push(' ');
+            }
+            prev_ws = true;
+        } else {
+            compact.push(ch);
+            prev_ws = false;
+        }
+    }
+    let compact = compact.trim();
+    if compact.chars().count() <= FAILURE_BODY_SNIPPET_BYTES {
+        return compact.to_owned();
+    }
+    let mut out: String = compact.chars().take(FAILURE_BODY_SNIPPET_BYTES).collect();
+    out.push('…');
+    out
+}
+
+async fn read_body_capped(resp: reqwest::Response) -> reqwest::Result<String> {
+    read_body_to(resp, usize::try_from(MAX_BODY_BYTES).unwrap_or(usize::MAX)).await
+}
+
+async fn read_body_to(mut resp: reqwest::Response, cap: usize) -> reqwest::Result<String> {
     let mut buf = Vec::with_capacity(4096);
     while let Some(bytes) = resp.chunk().await? {
         let remaining = cap.saturating_sub(buf.len());
