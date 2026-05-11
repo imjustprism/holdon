@@ -38,9 +38,10 @@ http = ["dep:reqwest"]
 postgres = ["dep:tokio-postgres", "dep:tokio-postgres-rustls", "dep:rustls", "dep:webpki-roots"]
 redis = ["dep:redis"]
 mysql = ["dep:mysql_async", "dep:rustls", "dep:webpki-roots"]
+grpc = ["dep:tonic", "dep:prost", "dep:http"]
 json-output = ["dep:serde_json"]
 all-databases = ["postgres", "redis", "mysql"]
-full = ["http", "postgres", "redis", "mysql", "json-output"]
+full = ["http", "postgres", "redis", "mysql", "grpc", "json-output"]
 
 [dependencies]
 tokio = { version = "1.41", default-features = false, features = [
@@ -95,6 +96,17 @@ mysql_async = { version = "0.36", default-features = false, features = [
   "ring",
   "webpki-roots",
 ], optional = true }
+tonic = { version = "0.13", default-features = false, features = [
+  "channel",
+  "prost",
+  "tls-ring",
+  "tls-webpki-roots",
+], optional = true }
+prost = { version = "0.13", default-features = false, features = [
+  "std",
+  "derive",
+], optional = true }
+http = { version = "1.1", default-features = false, optional = true }
 serde_json = { version = "1.0", default-features = false, features = ["std"], optional = true }
 
 [dev-dependencies]

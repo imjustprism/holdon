@@ -10,6 +10,8 @@ use crate::util::format_error_chain;
 mod dns;
 mod exec;
 mod file;
+#[cfg(feature = "grpc")]
+mod grpc;
 mod hint;
 #[cfg(feature = "http")]
 pub mod http;
@@ -70,6 +72,10 @@ impl Target {
             Self::Mysql { url } => mysql::probe(url, ctx).await,
             #[cfg(not(feature = "mysql"))]
             Self::Mysql { .. } => disabled_stage(StageKind::Mysql, "mysql"),
+            #[cfg(feature = "grpc")]
+            Self::Grpc { url, service } => grpc::probe(url, service, ctx).await,
+            #[cfg(not(feature = "grpc"))]
+            Self::Grpc { .. } => disabled_stage(StageKind::Grpc, "grpc"),
             Self::Exec { program, args } => exec::probe(program, args, ctx).await,
         };
         let ok = stages

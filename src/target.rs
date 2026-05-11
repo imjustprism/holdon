@@ -120,6 +120,19 @@ pub enum Target {
         /// Full `MySQL` connection URL.
         url: Url,
     },
+    /// gRPC `grpc.health.v1.Health/Check` against the target endpoint.
+    ///
+    /// Parsed from `grpc://host:port[/Service]` (plaintext) or
+    /// `grpcs://host:port[/Service]` (TLS via rustls). Path component selects
+    /// the gRPC service name to check. Empty path means overall server health.
+    /// Behind the `grpc` feature.
+    Grpc {
+        /// Endpoint URL (`grpc://` or `grpcs://`).
+        url: Url,
+        /// gRPC service name passed in `HealthCheckRequest.service`. Empty
+        /// string means "overall server" per the protocol.
+        service: String,
+    },
     /// Run an external command, ready iff it exits 0.
     ///
     /// Parsed from `exec://<program>[?arg=...&arg=...]`. The program may be a
@@ -221,6 +234,11 @@ impl fmt::Debug for Target {
                 .finish(),
             Self::Redis { url } => f.debug_struct("Redis").field("url", &redact(url)).finish(),
             Self::Mysql { url } => f.debug_struct("Mysql").field("url", &redact(url)).finish(),
+            Self::Grpc { url, service } => f
+                .debug_struct("Grpc")
+                .field("url", &redact(url))
+                .field("service", service)
+                .finish(),
             Self::Exec { program, args } => f
                 .debug_struct("Exec")
                 .field("program", program)
@@ -243,6 +261,7 @@ impl fmt::Display for Target {
             Self::Postgres { url } | Self::Redis { url } | Self::Mysql { url } => {
                 write!(f, "{}", redact(url))
             }
+            Self::Grpc { url, .. } => write!(f, "{}", redact(url)),
             Self::Exec { program, args } => {
                 write!(f, "exec://{}", program.display())?;
                 let mut first = true;
@@ -371,6 +390,15 @@ impl FromStr for Target {
             "postgres" | "postgresql" => Ok(Self::Postgres { url }),
             "redis" | "rediss" => Ok(Self::Redis { url }),
             "mysql" | "mariadb" => Ok(Self::Mysql { url }),
+            "grpc" | "grpcs" => {
+                let raw = url.path().trim_start_matches('/').trim_end_matches('/');
+                let service = if raw.is_empty() {
+                    String::new()
+                } else {
+                    raw.to_owned()
+                };
+                Ok(Self::Grpc { url, service })
+            }
             "dns" => {
                 let host = url
                     .host_str()
@@ -672,5 +700,35 @@ mod tests {
     fn tcp_colon_form() {
         let t: Target = "tcp:host:5432".parse().unwrap();
         assert!(matches!(t, Target::Tcp { ref host, port: 5432 } if host.as_str() == "host"));
+    }
+
+    #[test]
+    fn grpc_plaintext_no_service() {
+        let t: Target = "grpc://localhost:50051".parse().unwrap();
+        match t {
+            Target::Grpc { service, .. } => assert_eq!(service, ""),
+            _ => panic!("expected Grpc"),
+        }
+    }
+
+    #[test]
+    fn grpc_tls_with_service() {
+        let t: Target = "grpcs://api.example.com:443/my.Service".parse().unwrap();
+        match t {
+            Target::Grpc { url, service } => {
+                assert_eq!(url.scheme(), "grpcs");
+                assert_eq!(service, "my.Service");
+            }
+            _ => panic!("expected Grpc"),
+        }
+    }
+
+    #[test]
+    fn grpc_trailing_slash_normalized() {
+        let t: Target = "grpc://localhost:50051/svc/".parse().unwrap();
+        match t {
+            Target::Grpc { service, .. } => assert_eq!(service, "svc"),
+            _ => panic!("expected Grpc"),
+        }
     }
 }
