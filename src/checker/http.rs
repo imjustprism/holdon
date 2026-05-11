@@ -69,6 +69,13 @@ pub struct HttpConfig {
     /// Substring that must appear in the response body for the probe to pass.
     /// `None` skips body inspection. Body is capped at 1 MiB.
     pub body_substring: Option<String>,
+    /// Compiled regular expression the response body must match.
+    pub body_regex: Option<regex_lite::Regex>,
+    /// RFC 6901 JSON pointer + expected string value (`pointer=value`). On
+    /// `/status=UP`, holdon parses the body as JSON and checks that the value
+    /// at `/status` equals `"UP"`. Numbers and booleans are compared via
+    /// their JSON `to_string` (`true`, `42.5`).
+    pub body_json_match: Option<(String, String)>,
     /// Custom CA certificates in PEM, appended to the bundled webpki roots.
     pub extra_ca_pem: Vec<Vec<u8>>,
     /// Minimum TLS protocol version. Defaults to TLS 1.2.
@@ -178,15 +185,9 @@ pub(super) async fn probe(url: &Url, expect: &StatusRange, ctx: AttemptCtx) -> V
                     msg,
                     Some(hints::HTTP_RETRY),
                 )
-            } else if let Some(needle) = cfg.body_substring.as_deref() {
+            } else if needs_body_inspection(cfg) {
                 match read_body_capped(resp).await {
-                    Ok(body) if body.contains(needle) => ok_stage(StageKind::Http, start.elapsed()),
-                    Ok(_) => err_stage(
-                        StageKind::Http,
-                        start.elapsed(),
-                        "body did not contain expected substring",
-                        Some(hints::HTTP_BODY_MISMATCH),
-                    ),
+                    Ok(body) => evaluate_body_matchers(cfg, &body, start),
                     Err(e) => {
                         let hint = e.hint();
                         let mut msg = format_error_chain(&e);
@@ -216,6 +217,85 @@ pub(super) async fn probe(url: &Url, expect: &StatusRange, ctx: AttemptCtx) -> V
         }
     };
     vec![stage]
+}
+
+const fn needs_body_inspection(cfg: &HttpConfig) -> bool {
+    cfg.body_substring.is_some() || cfg.body_regex.is_some() || cfg.body_json_match.is_some()
+}
+
+fn evaluate_body_matchers(cfg: &HttpConfig, body: &str, start: Instant) -> Stage {
+    if let Some(needle) = cfg.body_substring.as_deref() {
+        if !body.contains(needle) {
+            return err_stage(
+                StageKind::Http,
+                start.elapsed(),
+                "body did not contain expected substring",
+                Some(hints::HTTP_BODY_MISMATCH),
+            );
+        }
+    }
+    if let Some(re) = cfg.body_regex.as_ref() {
+        if !re.is_match(body) {
+            return err_stage(
+                StageKind::Http,
+                start.elapsed(),
+                format!("body did not match regex `{}`", re.as_str()),
+                Some(hints::HTTP_BODY_REGEX_MISMATCH),
+            );
+        }
+    }
+    if let Some((pointer, expected)) = cfg.body_json_match.as_ref() {
+        match serde_json::from_str::<serde_json::Value>(body) {
+            Ok(value) => match value.pointer(pointer) {
+                Some(found) if json_value_matches(found, expected) => {}
+                Some(found) => {
+                    return err_stage(
+                        StageKind::Http,
+                        start.elapsed(),
+                        format!(
+                            "json pointer `{pointer}` was `{}`, expected `{expected}`",
+                            display_json_value(found)
+                        ),
+                        Some(hints::HTTP_JSON_MISMATCH),
+                    );
+                }
+                None => {
+                    return err_stage(
+                        StageKind::Http,
+                        start.elapsed(),
+                        format!("json pointer `{pointer}` not present in body"),
+                        Some(hints::HTTP_JSON_MISMATCH),
+                    );
+                }
+            },
+            Err(e) => {
+                return err_stage(
+                    StageKind::Http,
+                    start.elapsed(),
+                    format!("response body is not valid JSON: {e}"),
+                    Some(hints::HTTP_JSON_MISMATCH),
+                );
+            }
+        }
+    }
+    ok_stage(StageKind::Http, start.elapsed())
+}
+
+fn json_value_matches(found: &serde_json::Value, expected: &str) -> bool {
+    match found {
+        serde_json::Value::String(s) => s == expected,
+        serde_json::Value::Bool(b) => b.to_string() == expected,
+        serde_json::Value::Number(n) => n.to_string() == expected,
+        serde_json::Value::Null => expected == "null",
+        _ => false,
+    }
+}
+
+fn display_json_value(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
 }
 
 fn upstream_hint(headers: &HeaderMap) -> Option<String> {

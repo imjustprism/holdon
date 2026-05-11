@@ -242,6 +242,24 @@ pub(crate) struct Args {
     #[cfg(feature = "http")]
     #[arg(
         long,
+        value_name = "PATTERN",
+        value_parser = parse_body_regex,
+        help = "Regex the HTTP response body must match"
+    )]
+    pub(crate) expect_body_regex: Option<regex_lite::Regex>,
+
+    #[cfg(feature = "http")]
+    #[arg(
+        long,
+        value_name = "POINTER=VALUE",
+        value_parser = parse_json_match,
+        help = "Require JSON pointer POINTER (RFC 6901) to equal VALUE (e.g. /status=UP)"
+    )]
+    pub(crate) expect_json: Option<(String, String)>,
+
+    #[cfg(feature = "http")]
+    #[arg(
+        long,
         help = "Do not follow HTTP redirects; report the first response status"
     )]
     pub(crate) no_follow_redirects: bool,
@@ -281,6 +299,25 @@ impl From<TlsMinArg> for holdon::checker::http::TlsMin {
             TlsMinArg::V13 => Self::V13,
         }
     }
+}
+
+#[cfg(feature = "http")]
+fn parse_body_regex(input: &str) -> Result<regex_lite::Regex, String> {
+    regex_lite::Regex::new(input).map_err(|e| format!("invalid regex: {e}"))
+}
+
+#[cfg(feature = "http")]
+fn parse_json_match(input: &str) -> Result<(String, String), String> {
+    let (pointer, value) = input
+        .split_once('=')
+        .ok_or_else(|| "expected `POINTER=VALUE`".to_owned())?;
+    if pointer.is_empty() {
+        return Err("json pointer cannot be empty".into());
+    }
+    if !pointer.starts_with('/') {
+        return Err("json pointer must start with `/` (RFC 6901)".into());
+    }
+    Ok((pointer.to_owned(), value.to_owned()))
 }
 
 fn parse_status_range(s: &str) -> Result<(u16, u16), String> {
