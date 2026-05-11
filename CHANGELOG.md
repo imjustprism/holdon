@@ -6,6 +6,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-05-11
+
 ### Added
 
 - `log:///path/to/file?match=needle` (substring) or
@@ -27,21 +29,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `status 503 [server: nginx/1.27]: {"error":"db not ready"}` instead of
   the bare `status 503`. Helps answer the "why is it 5xx?" question
   without an extra `curl -v`.
-
-### Added
-
 - gRPC `Health/Check` probe via `tonic` + rustls. URL forms `grpc://host:port`
   or `grpcs://host:port` for TLS, with optional `/Service` path to select a
-  specific service. Behind the `mysql`-style `grpc` cargo feature, bundled in
-  `full`. Operator hints for `NOT_SERVING`, `UNIMPLEMENTED`, unknown service,
-  TLS handshake failure, and auth.
-
-### Added
-
+  specific service. Behind the `grpc` cargo feature, bundled in `full`.
+  Operator hints for `NOT_SERVING`, `UNIMPLEMENTED`, unknown service, TLS
+  handshake failure, and auth.
 - Shell completion script generation via hidden flag
   `--generate-completion <bash|zsh|fish|power-shell|elvish>` (writes to
-  stdout). Man page generation via `--generate-manpage`. Both are bundled
-  as `holdon-completions-and-manpage.tar.gz` in every GitHub Release.
+  stdout). Man page generation via `--generate-manpage`.
 - TOML configuration file via `--config <PATH>` (or env `HOLDON_CONFIG`).
   Auto-detects `holdon.toml` / `.holdon.toml` in the current directory when
   no flag is given. Supports global defaults (`interval`, `timeout`,
@@ -112,6 +107,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `--insecure` emits a stderr warning on every run
 - Stdin target ingest capped at 10 000 entries and 2 KiB per string
 
-[Unreleased]: https://github.com/imjustprism/holdon/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/imjustprism/holdon/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/imjustprism/holdon/releases/tag/v0.1.2
 [0.1.1]: https://github.com/imjustprism/holdon/releases/tag/v0.1.1
 [0.1.0]: https://github.com/imjustprism/holdon/releases/tag/v0.1.0

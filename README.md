@@ -32,7 +32,6 @@ hint: service may still be initializing
 | Prebuilt binaries | [GitHub Releases](https://github.com/imjustprism/holdon/releases)  |
 | Docker            | `docker pull ghcr.io/imjustprism/holdon`                           |
 | Install script    | `curl -fsSL https://raw.githubusercontent.com/imjustprism/holdon/main/install.sh \| sh` |
-| Homebrew (planned)| `brew install imjustprism/holdon/holdon`                           |
 
 Minimum supported Rust version: **1.85**.
 
