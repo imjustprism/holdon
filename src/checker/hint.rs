@@ -67,6 +67,14 @@ pub(crate) mod hints {
         "server major version did not match expect-version, check the target server";
     pub(crate) const INFLUXDB_PARSE: &str =
         "fix the influxdb:// URL, only ?expect-version=1|2 is supported";
+    pub(crate) const MONGODB_NOT_READY: &str =
+        "mongodb server slow, not yet accepting connections, or unreachable";
+    pub(crate) const MONGODB_AUTH: &str =
+        "auth failed, check username, password, and authSource in the URL";
+    pub(crate) const MONGODB_NO_PRIMARY: &str =
+        "no primary available, the replica set is electing or unreachable";
+    pub(crate) const MONGODB_TLS: &str =
+        "tls handshake failed, check ?tls=true and CA cert configuration";
 }
 
 impl Hintable for std::io::Error {

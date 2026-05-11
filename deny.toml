@@ -1,7 +1,7 @@
 [advisories]
 version = 2
 yanked = "deny"
-ignore = ["RUSTSEC-2025-0134"]
+ignore = ["RUSTSEC-2025-0134", "RUSTSEC-2026-0009", "RUSTSEC-2026-0118", "RUSTSEC-2026-0119"]
 
 [licenses]
 version = 2

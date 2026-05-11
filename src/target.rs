@@ -171,6 +171,16 @@ pub enum Target {
         /// Full `InfluxDB` URL.
         url: Url,
     },
+    /// `MongoDB` connect plus admin `ping` command.
+    ///
+    /// Parsed from `mongodb://[user:pass@]host[:port][/db][?options]` or
+    /// `mongodb+srv://[user:pass@]host[/db][?options]` for DNS SRV
+    /// discovery. TLS is negotiated via the URL `?tls=true` option per the
+    /// `MongoDB` connection string spec. Behind the `mongodb` feature.
+    Mongodb {
+        /// Full `MongoDB` connection URL.
+        url: Url,
+    },
 }
 
 /// Matcher applied to log file content by [`Target::Log`].
@@ -295,6 +305,10 @@ impl fmt::Debug for Target {
                 .debug_struct("Influxdb")
                 .field("url", &redact(url))
                 .finish(),
+            Self::Mongodb { url } => f
+                .debug_struct("Mongodb")
+                .field("url", &redact(url))
+                .finish(),
         }
     }
 }
@@ -309,10 +323,12 @@ impl fmt::Display for Target {
                 FileMode::Present => write!(f, "file://{}", path.display()),
                 FileMode::Absent => write!(f, "file://{}?mode=absent", path.display()),
             },
-            Self::Postgres { url } | Self::Redis { url } | Self::Mysql { url } => {
-                write!(f, "{}", redact(url))
-            }
-            Self::Grpc { url, .. } | Self::Influxdb { url } => write!(f, "{}", redact(url)),
+            Self::Postgres { url }
+            | Self::Redis { url }
+            | Self::Mysql { url }
+            | Self::Grpc { url, .. }
+            | Self::Influxdb { url }
+            | Self::Mongodb { url } => write!(f, "{}", redact(url)),
             Self::Exec { program, args } => {
                 write!(f, "exec://{}", program.display())?;
                 let mut first = true;
@@ -448,6 +464,13 @@ impl FromStr for Target {
             "postgres" | "postgresql" => Ok(Self::Postgres { url }),
             "redis" | "rediss" => Ok(Self::Redis { url }),
             "mysql" | "mariadb" => Ok(Self::Mysql { url }),
+            "mongodb" | "mongodb+srv" => {
+                let host = url
+                    .host_str()
+                    .ok_or_else(|| parse_err(input, "missing host"))?;
+                Hostname::new(host)?;
+                Ok(Self::Mongodb { url })
+            }
             "influxdb" | "influxdbs" => {
                 let host = url
                     .host_str()
@@ -998,5 +1021,31 @@ mod tests {
     #[test]
     fn influxdb_missing_port_rejected() {
         assert!("influxdb://localhost".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn mongodb_plain_parses() {
+        let t: Target = "mongodb://localhost:27017".parse().unwrap();
+        assert!(matches!(t, Target::Mongodb { .. }));
+    }
+
+    #[test]
+    fn mongodb_with_userinfo_parses() {
+        let t: Target = "mongodb://user:pass@localhost:27017/admin".parse().unwrap();
+        assert!(matches!(t, Target::Mongodb { .. }));
+    }
+
+    #[test]
+    fn mongodb_srv_parses() {
+        let t: Target = "mongodb+srv://cluster.example.com/db".parse().unwrap();
+        assert!(matches!(t, Target::Mongodb { .. }));
+    }
+
+    #[test]
+    fn mongodb_display_redacts_password() {
+        let t: Target = "mongodb://user:secret@h:27017".parse().unwrap();
+        let s = format!("{t}");
+        assert!(!s.contains("secret"));
+        assert!(s.contains("***"));
     }
 }

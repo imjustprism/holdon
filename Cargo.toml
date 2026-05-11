@@ -41,9 +41,10 @@ redis = ["dep:redis"]
 mysql = ["dep:mysql_async", "dep:rustls", "dep:webpki-roots"]
 grpc = ["dep:tonic", "dep:prost", "dep:http"]
 influxdb = ["http"]
+mongodb = ["dep:mongodb", "dep:rustls", "dep:webpki-roots"]
 json-output = ["dep:serde_json"]
-all-databases = ["postgres", "redis", "mysql"]
-full = ["http", "postgres", "redis", "mysql", "grpc", "influxdb", "json-output"]
+all-databases = ["postgres", "redis", "mysql", "mongodb"]
+full = ["http", "postgres", "redis", "mysql", "mongodb", "grpc", "influxdb", "json-output"]
 
 [dependencies]
 tokio = { version = "1.41", default-features = false, features = [
@@ -98,6 +99,12 @@ mysql_async = { version = "0.36", default-features = false, features = [
   "rustls-tls",
   "ring",
   "webpki-roots",
+], optional = true }
+mongodb = { version = "3.6", default-features = false, features = [
+  "rustls-tls",
+  "dns-resolver",
+  "bson-2",
+  "compat-3-3-0",
 ], optional = true }
 tonic = { version = "0.13", default-features = false, features = [
   "channel",
