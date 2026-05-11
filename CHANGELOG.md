@@ -8,6 +8,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `log:///path/to/file?match=needle` (substring) or
+  `log:///path/to/file?regex=pattern` (compiled at parse time) target
+  scheme. Reads the trailing 1 MiB of the file on each attempt, so it
+  works against rotated multi-GB logs. UNC and remote hosts refused at
+  parse time. Operator hints distinguish "pattern not yet present" from
+  "log file missing".
 - HTTP `--expect-body-regex <PATTERN>` to require the response body to
   match a regex. Uses `regex-lite` for a small binary footprint.
 - HTTP `--expect-json <POINTER=VALUE>` to require an RFC 6901 JSON

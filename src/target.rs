@@ -150,6 +150,38 @@ pub enum Target {
         /// string means "overall server" per the protocol.
         service: String,
     },
+    /// Wait for a substring or regex to appear in a local log file.
+    ///
+    /// Parsed from `log:///absolute/path?match=needle` or
+    /// `log:///absolute/path?regex=pattern`. Reads up to the last 1 MiB of
+    /// the file on each attempt and applies the matcher.
+    Log {
+        /// Absolute file path. UNC paths are refused at parse time.
+        path: PathBuf,
+        /// Matcher to apply against the file content.
+        matcher: LogMatcher,
+    },
+}
+
+/// Matcher applied to log file content by [`Target::Log`].
+#[derive(Clone)]
+#[non_exhaustive]
+pub enum LogMatcher {
+    /// Literal substring search. Matches when the bytes appear anywhere in
+    /// the read window.
+    Substring(String),
+    /// Compiled regular expression. Matches when the regex hits anywhere in
+    /// the read window.
+    Regex(std::sync::Arc<regex_lite::Regex>),
+}
+
+impl fmt::Debug for LogMatcher {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Substring(s) => f.debug_tuple("Substring").field(s).finish(),
+            Self::Regex(re) => f.debug_tuple("Regex").field(&re.as_str()).finish(),
+        }
+    }
 }
 
 /// Whether a [`Target::File`] check waits for a path to exist or to disappear.
@@ -244,6 +276,11 @@ impl fmt::Debug for Target {
                 .field("program", program)
                 .field("args", args)
                 .finish(),
+            Self::Log { path, matcher } => f
+                .debug_struct("Log")
+                .field("path", path)
+                .field("matcher", matcher)
+                .finish(),
         }
     }
 }
@@ -272,6 +309,13 @@ impl fmt::Display for Target {
                 }
                 Ok(())
             }
+            Self::Log { path, matcher } => {
+                write!(f, "log://{}", path.display())?;
+                match matcher {
+                    LogMatcher::Substring(s) => write!(f, "?match={}", encode_arg(s)),
+                    LogMatcher::Regex(re) => write!(f, "?regex={}", encode_arg(re.as_str())),
+                }
+            }
         }
     }
 }
@@ -281,7 +325,7 @@ fn encode_arg(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
-            '&' | '=' | '?' | '#' | '%' | ' ' => {
+            '&' | '=' | '?' | '#' | '%' | ' ' | '+' => {
                 for b in c.to_string().bytes() {
                     let _ = write!(out, "%{b:02X}");
                 }
@@ -440,6 +484,69 @@ impl FromStr for Target {
                     },
                 );
                 Ok(Self::File { path, mode })
+            }
+            "log" => {
+                let host_remote = url
+                    .host_str()
+                    .is_some_and(|h| !h.is_empty() && !h.eq_ignore_ascii_case("localhost"));
+                if host_remote || url.path().starts_with("//") {
+                    return Err(parse_err(
+                        input,
+                        "remote/UNC log paths are refused (NTLM-relay risk)",
+                    ));
+                }
+                let path = url
+                    .to_file_path()
+                    .map_err(|()| parse_err(input, "invalid log path"))?;
+                if is_unc_or_remote(&path) {
+                    return Err(parse_err(
+                        input,
+                        "remote/UNC log paths are refused (NTLM-relay risk)",
+                    ));
+                }
+                let mut substring: Option<String> = None;
+                let mut regex_pat: Option<String> = None;
+                for (k, v) in url.query_pairs() {
+                    match k.as_ref() {
+                        "match" => substring = Some(v.into_owned()),
+                        "regex" => regex_pat = Some(v.into_owned()),
+                        other => {
+                            return Err(parse_err(
+                                input,
+                                &format!(
+                                    "unknown log:// query key `{other}` (only `match` or `regex` supported)"
+                                ),
+                            ));
+                        }
+                    }
+                }
+                let matcher = match (substring, regex_pat) {
+                    (Some(_), Some(_)) => {
+                        return Err(parse_err(
+                            input,
+                            "log:// accepts only one of `match` or `regex`",
+                        ));
+                    }
+                    (Some(s), None) if s.is_empty() => {
+                        return Err(parse_err(input, "log:// `match` cannot be empty"));
+                    }
+                    (None, Some(r)) if r.is_empty() => {
+                        return Err(parse_err(input, "log:// `regex` cannot be empty"));
+                    }
+                    (Some(s), None) => LogMatcher::Substring(s),
+                    (None, Some(r)) => {
+                        let re = regex_lite::Regex::new(&r)
+                            .map_err(|e| parse_err(input, &format!("invalid regex: {e}")))?;
+                        LogMatcher::Regex(std::sync::Arc::new(re))
+                    }
+                    (None, None) => {
+                        return Err(parse_err(
+                            input,
+                            "log:// requires `?match=...` or `?regex=...`",
+                        ));
+                    }
+                };
+                Ok(Self::Log { path, matcher })
             }
             other => Err(Error::UnsupportedScheme(other.into())),
         }
@@ -742,5 +849,71 @@ mod tests {
     fn grpc_missing_port_rejected() {
         assert!("grpc://localhost".parse::<Target>().is_err());
         assert!("grpcs://api.example.com/svc".parse::<Target>().is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn log_substring_match_parses() {
+        let t: Target = "log:///tmp/app.log?match=Listening".parse().unwrap();
+        match t {
+            Target::Log { path, matcher } => {
+                assert_eq!(path, PathBuf::from("/tmp/app.log"));
+                assert!(matches!(matcher, LogMatcher::Substring(ref s) if s == "Listening"));
+            }
+            _ => panic!("expected Log"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn log_regex_compiles_at_parse() {
+        let t: Target = "log:///tmp/app.log?regex=Listening%20on%20%5Cd%2B"
+            .parse()
+            .unwrap();
+        match t {
+            Target::Log {
+                matcher: LogMatcher::Regex(re),
+                ..
+            } => {
+                assert!(re.is_match("Listening on 8080"));
+            }
+            _ => panic!("expected Log/Regex"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn log_requires_matcher() {
+        assert!("log:///tmp/app.log".parse::<Target>().is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn log_rejects_both_match_and_regex() {
+        assert!(
+            "log:///tmp/app.log?match=x&regex=y"
+                .parse::<Target>()
+                .is_err()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn log_rejects_unknown_query() {
+        assert!(
+            "log:///tmp/app.log?from=end&match=x"
+                .parse::<Target>()
+                .is_err()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn log_rejects_remote_host() {
+        assert!(
+            "log://attacker.com/tmp/app.log?match=x"
+                .parse::<Target>()
+                .is_err()
+        );
     }
 }
