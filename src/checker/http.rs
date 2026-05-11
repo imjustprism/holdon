@@ -169,6 +169,9 @@ pub(super) async fn probe(url: &Url, expect: &StatusRange, ctx: AttemptCtx) -> V
                     msg.push_str(": ");
                     msg.push_str(&snippet);
                 }
+                if !pw.is_empty() {
+                    msg = redact_in(&msg, &pw);
+                }
                 err_stage(
                     StageKind::Http,
                     start.elapsed(),
