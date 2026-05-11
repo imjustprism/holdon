@@ -173,8 +173,52 @@ pub(crate) struct Args {
     #[arg(long, help = "Skip TLS certificate verification (dev only)")]
     pub(crate) insecure: bool,
 
+    #[cfg(feature = "http")]
+    #[arg(long, help = "Substring that must appear in the HTTP response body")]
+    pub(crate) expect_body: Option<String>,
+
+    #[cfg(feature = "http")]
+    #[arg(
+        long,
+        help = "Do not follow HTTP redirects; report the first response status"
+    )]
+    pub(crate) no_follow_redirects: bool,
+
+    #[cfg(feature = "http")]
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Append PEM CA certificate(s) from PATH to the bundled webpki roots"
+    )]
+    pub(crate) ca_cert: Option<std::path::PathBuf>,
+
+    #[cfg(feature = "http")]
+    #[arg(long, value_enum, default_value_t = TlsMinArg::V12,
+          help = "Minimum TLS version for HTTPS probes")]
+    pub(crate) tls_min: TlsMinArg,
+
     #[arg(last = true)]
     pub(crate) exec: Vec<String>,
+}
+
+#[cfg(feature = "http")]
+#[derive(Debug, Clone, Copy, ValueEnum, Default, PartialEq, Eq)]
+pub(crate) enum TlsMinArg {
+    #[default]
+    #[value(name = "1.2")]
+    V12,
+    #[value(name = "1.3")]
+    V13,
+}
+
+#[cfg(feature = "http")]
+impl From<TlsMinArg> for holdon::checker::http::TlsMin {
+    fn from(v: TlsMinArg) -> Self {
+        match v {
+            TlsMinArg::V12 => Self::V12,
+            TlsMinArg::V13 => Self::V13,
+        }
+    }
 }
 
 fn parse_status_range(s: &str) -> Result<(u16, u16), String> {
