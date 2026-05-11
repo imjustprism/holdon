@@ -161,6 +161,16 @@ pub enum Target {
         /// Matcher to apply against the file content.
         matcher: LogMatcher,
     },
+    /// `InfluxDB` `/ping` probe.
+    ///
+    /// Parsed from `influxdb://host:8086` (plaintext) or
+    /// `influxdbs://host:8086` (TLS via rustls). Optional
+    /// `?expect-version=1|2` requires the `X-Influxdb-Version` response
+    /// header's major to match. Behind the `influxdb` feature.
+    Influxdb {
+        /// Full `InfluxDB` URL.
+        url: Url,
+    },
 }
 
 /// Matcher applied to log file content by [`Target::Log`].
@@ -281,6 +291,10 @@ impl fmt::Debug for Target {
                 .field("path", path)
                 .field("matcher", matcher)
                 .finish(),
+            Self::Influxdb { url } => f
+                .debug_struct("Influxdb")
+                .field("url", &redact(url))
+                .finish(),
         }
     }
 }
@@ -298,7 +312,7 @@ impl fmt::Display for Target {
             Self::Postgres { url } | Self::Redis { url } | Self::Mysql { url } => {
                 write!(f, "{}", redact(url))
             }
-            Self::Grpc { url, .. } => write!(f, "{}", redact(url)),
+            Self::Grpc { url, .. } | Self::Influxdb { url } => write!(f, "{}", redact(url)),
             Self::Exec { program, args } => {
                 write!(f, "exec://{}", program.display())?;
                 let mut first = true;
@@ -434,6 +448,15 @@ impl FromStr for Target {
             "postgres" | "postgresql" => Ok(Self::Postgres { url }),
             "redis" | "rediss" => Ok(Self::Redis { url }),
             "mysql" | "mariadb" => Ok(Self::Mysql { url }),
+            "influxdb" | "influxdbs" => {
+                let host = url
+                    .host_str()
+                    .ok_or_else(|| parse_err(input, "missing host"))?;
+                Hostname::new(host)?;
+                url.port_or_known_default()
+                    .ok_or_else(|| Error::MissingPort(input.into()))?;
+                Ok(Self::Influxdb { url })
+            }
             "grpc" | "grpcs" => {
                 let host = url
                     .host_str()

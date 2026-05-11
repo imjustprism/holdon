@@ -40,9 +40,10 @@ postgres = ["dep:tokio-postgres", "dep:tokio-postgres-rustls", "dep:rustls", "de
 redis = ["dep:redis"]
 mysql = ["dep:mysql_async", "dep:rustls", "dep:webpki-roots"]
 grpc = ["dep:tonic", "dep:prost", "dep:http"]
+influxdb = ["http"]
 json-output = ["dep:serde_json"]
 all-databases = ["postgres", "redis", "mysql"]
-full = ["http", "postgres", "redis", "mysql", "grpc", "json-output"]
+full = ["http", "postgres", "redis", "mysql", "grpc", "influxdb", "json-output"]
 
 [dependencies]
 tokio = { version = "1.41", default-features = false, features = [

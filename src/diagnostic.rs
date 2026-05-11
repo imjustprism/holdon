@@ -62,6 +62,8 @@ pub enum StageKind {
     Grpc,
     /// Log file content match for `log://` targets.
     Log,
+    /// `InfluxDB` `/ping` health probe for `influxdb://` targets.
+    Influxdb,
 }
 
 /// Outcome of a single [`Stage`].
@@ -126,6 +128,7 @@ impl StageKind {
             Self::Exec => "exec",
             Self::Grpc => "grpc",
             Self::Log => "log",
+            Self::Influxdb => "influxdb",
         }
     }
 }
@@ -143,6 +146,7 @@ impl fmt::Display for StageKind {
             Self::Exec => "external command",
             Self::Grpc => "gRPC health",
             Self::Log => "log file match",
+            Self::Influxdb => "InfluxDB ping",
         })
     }
 }

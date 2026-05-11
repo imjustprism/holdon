@@ -15,6 +15,8 @@ mod grpc;
 mod hint;
 #[cfg(feature = "http")]
 pub mod http;
+#[cfg(feature = "influxdb")]
+mod influxdb;
 mod log;
 #[cfg(feature = "mysql")]
 mod mysql;
@@ -79,6 +81,10 @@ impl Target {
             Self::Grpc { .. } => disabled_stage(StageKind::Grpc, "grpc"),
             Self::Log { path, matcher } => log::probe(path, matcher).await,
             Self::Exec { program, args } => exec::probe(program, args, ctx).await,
+            #[cfg(feature = "influxdb")]
+            Self::Influxdb { url } => influxdb::probe(url, ctx).await,
+            #[cfg(not(feature = "influxdb"))]
+            Self::Influxdb { .. } => disabled_stage(StageKind::Influxdb, "influxdb"),
         };
         let ok = stages
             .last()
