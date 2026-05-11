@@ -24,9 +24,21 @@ pub async fn bind_ephemeral() -> (TcpListener, u16) {
 }
 
 pub async fn free_port() -> u16 {
-    let (l, p) = bind_ephemeral().await;
-    drop(l);
-    p
+    use tokio::net::TcpStream;
+    for _ in 0..20 {
+        let (l, p) = bind_ephemeral().await;
+        drop(l);
+        match tokio::time::timeout(
+            Duration::from_millis(50),
+            TcpStream::connect(("127.0.0.1", p)),
+        )
+        .await
+        {
+            Ok(Err(_)) | Err(_) => return p,
+            Ok(Ok(_)) => continue,
+        }
+    }
+    panic!("could not obtain a verified-closed port after 20 attempts");
 }
 
 pub fn tcp_target(port: u16) -> Target {
