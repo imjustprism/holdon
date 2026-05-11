@@ -18,6 +18,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   failure, no-primary, and TLS handshake errors. Password redacted in
   `Display`, `Debug`, and every error path. Behind the new `mongodb`
   cargo feature. Included in `all-databases` and `full`.
+- `amqp://` and `amqps://` probe for `RabbitMQ` and any AMQP 0-9-1
+  broker via `lapin` with rustls. Optional `?queue=NAME` performs a
+  passive queue declare and fails if the queue is absent. Optional
+  `?exchange=NAME` performs a passive exchange declare. Operator hints
+  classify access-refused, vhost-denied, queue-not-found, and TLS
+  handshake errors. Password redacted in `Display`, `Debug`, and every
+  error path. Behind the new `rabbitmq` cargo feature.
 
 ## [0.1.2] - 2026-05-11
 

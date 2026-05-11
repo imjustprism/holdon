@@ -24,6 +24,8 @@ mod mongodb;
 mod mysql;
 #[cfg(feature = "postgres")]
 mod postgres;
+#[cfg(feature = "rabbitmq")]
+mod rabbitmq;
 #[cfg(feature = "redis")]
 mod redis;
 mod tcp;
@@ -91,6 +93,14 @@ impl Target {
             Self::Mongodb { url } => mongodb::probe(url, ctx).await,
             #[cfg(not(feature = "mongodb"))]
             Self::Mongodb { .. } => disabled_stage(StageKind::Mongodb, "mongodb"),
+            #[cfg(feature = "rabbitmq")]
+            Self::Rabbitmq {
+                url,
+                queue,
+                exchange,
+            } => rabbitmq::probe(url, queue.as_deref(), exchange.as_deref(), ctx).await,
+            #[cfg(not(feature = "rabbitmq"))]
+            Self::Rabbitmq { .. } => disabled_stage(StageKind::Rabbitmq, "rabbitmq"),
         };
         let ok = stages
             .last()

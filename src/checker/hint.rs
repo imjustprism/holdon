@@ -75,6 +75,15 @@ pub(crate) mod hints {
         "no primary available, the replica set is electing or unreachable";
     pub(crate) const MONGODB_TLS: &str =
         "tls handshake failed, check ?tls=true and CA cert configuration";
+    pub(crate) const RABBITMQ_NOT_READY: &str =
+        "rabbitmq broker slow, not yet listening, or unreachable";
+    pub(crate) const RABBITMQ_AUTH: &str = "auth failed, check username and password in the URL";
+    pub(crate) const RABBITMQ_VHOST: &str =
+        "vhost denied, check the /vhost path in the URL and broker permissions";
+    pub(crate) const RABBITMQ_QUEUE: &str =
+        "queue or exchange does not exist on the broker, check name and vhost";
+    pub(crate) const RABBITMQ_TLS: &str =
+        "tls handshake failed, check amqps:// and CA cert configuration";
 }
 
 impl Hintable for std::io::Error {

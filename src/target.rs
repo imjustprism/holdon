@@ -181,6 +181,21 @@ pub enum Target {
         /// Full `MongoDB` connection URL.
         url: Url,
     },
+    /// `RabbitMQ` AMQP 0-9-1 connection probe.
+    ///
+    /// Parsed from `amqp://[user:pass@]host[:port][/vhost]` (plaintext) or
+    /// `amqps://[user:pass@]host[:port][/vhost]` (TLS via rustls).
+    /// Optional `?queue=NAME` performs a passive queue declare, failing if
+    /// the queue is absent. Optional `?exchange=NAME` performs a passive
+    /// exchange declare. Behind the `rabbitmq` feature.
+    Rabbitmq {
+        /// Full AMQP connection URL.
+        url: Url,
+        /// Queue to passively declare, if any.
+        queue: Option<String>,
+        /// Exchange to passively declare, if any.
+        exchange: Option<String>,
+    },
 }
 
 /// Matcher applied to log file content by [`Target::Log`].
@@ -309,6 +324,16 @@ impl fmt::Debug for Target {
                 .debug_struct("Mongodb")
                 .field("url", &redact(url))
                 .finish(),
+            Self::Rabbitmq {
+                url,
+                queue,
+                exchange,
+            } => f
+                .debug_struct("Rabbitmq")
+                .field("url", &redact(url))
+                .field("queue", queue)
+                .field("exchange", exchange)
+                .finish(),
         }
     }
 }
@@ -328,7 +353,8 @@ impl fmt::Display for Target {
             | Self::Mysql { url }
             | Self::Grpc { url, .. }
             | Self::Influxdb { url }
-            | Self::Mongodb { url } => write!(f, "{}", redact(url)),
+            | Self::Mongodb { url }
+            | Self::Rabbitmq { url, .. } => write!(f, "{}", redact(url)),
             Self::Exec { program, args } => {
                 write!(f, "exec://{}", program.display())?;
                 let mut first = true;
@@ -470,6 +496,43 @@ impl FromStr for Target {
                     .ok_or_else(|| parse_err(input, "missing host"))?;
                 Hostname::new(host)?;
                 Ok(Self::Mongodb { url })
+            }
+            "amqp" | "amqps" => {
+                let host = url
+                    .host_str()
+                    .ok_or_else(|| parse_err(input, "missing host"))?;
+                Hostname::new(host)?;
+                let mut queue: Option<String> = None;
+                let mut exchange: Option<String> = None;
+                for (k, v) in url.query_pairs() {
+                    match k.as_ref() {
+                        "queue" => {
+                            if v.is_empty() {
+                                return Err(parse_err(input, "amqp:// queue cannot be empty"));
+                            }
+                            queue = Some(v.into_owned());
+                        }
+                        "exchange" => {
+                            if v.is_empty() {
+                                return Err(parse_err(input, "amqp:// exchange cannot be empty"));
+                            }
+                            exchange = Some(v.into_owned());
+                        }
+                        other => {
+                            return Err(parse_err(
+                                input,
+                                &format!(
+                                    "unknown amqp:// query key `{other}` (only `queue` or `exchange` supported)"
+                                ),
+                            ));
+                        }
+                    }
+                }
+                Ok(Self::Rabbitmq {
+                    url,
+                    queue,
+                    exchange,
+                })
             }
             "influxdb" | "influxdbs" => {
                 let host = url
@@ -1044,6 +1107,58 @@ mod tests {
     #[test]
     fn mongodb_display_redacts_password() {
         let t: Target = "mongodb://user:secret@h:27017".parse().unwrap();
+        let s = format!("{t}");
+        assert!(!s.contains("secret"));
+        assert!(s.contains("***"));
+    }
+
+    #[test]
+    fn amqp_plain_parses() {
+        let t: Target = "amqp://localhost:5672".parse().unwrap();
+        match t {
+            Target::Rabbitmq {
+                queue, exchange, ..
+            } => {
+                assert!(queue.is_none());
+                assert!(exchange.is_none());
+            }
+            _ => panic!("expected Rabbitmq"),
+        }
+    }
+
+    #[test]
+    fn amqps_with_vhost_parses() {
+        let t: Target = "amqps://u:p@h:5671/myvhost".parse().unwrap();
+        assert!(matches!(t, Target::Rabbitmq { .. }));
+    }
+
+    #[test]
+    fn amqp_extracts_queue_and_exchange() {
+        let t: Target = "amqp://h:5672/?queue=jobs&exchange=events".parse().unwrap();
+        match t {
+            Target::Rabbitmq {
+                queue, exchange, ..
+            } => {
+                assert_eq!(queue.as_deref(), Some("jobs"));
+                assert_eq!(exchange.as_deref(), Some("events"));
+            }
+            _ => panic!("expected Rabbitmq"),
+        }
+    }
+
+    #[test]
+    fn amqp_rejects_unknown_query() {
+        assert!("amqp://h:5672/?foo=bar".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn amqp_rejects_empty_queue() {
+        assert!("amqp://h:5672/?queue=".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn amqp_display_redacts_password() {
+        let t: Target = "amqp://user:secret@h:5672".parse().unwrap();
         let s = format!("{t}");
         assert!(!s.contains("secret"));
         assert!(s.contains("***"));
