@@ -15,6 +15,7 @@ mod grpc;
 mod hint;
 #[cfg(feature = "http")]
 pub mod http;
+mod log;
 #[cfg(feature = "mysql")]
 mod mysql;
 #[cfg(feature = "postgres")]
@@ -76,6 +77,7 @@ impl Target {
             Self::Grpc { url, service } => grpc::probe(url, service, ctx).await,
             #[cfg(not(feature = "grpc"))]
             Self::Grpc { .. } => disabled_stage(StageKind::Grpc, "grpc"),
+            Self::Log { path, matcher } => log::probe(path, matcher).await,
             Self::Exec { program, args } => exec::probe(program, args, ctx).await,
         };
         let ok = stages

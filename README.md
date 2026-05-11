@@ -88,6 +88,7 @@ holdon exec:///usr/local/bin/check.sh     # custom readiness command
 | `mysql://`, `mariadb://`        | Connect + `SELECT 1` (TLS by default)     |
 | `redis://`, `rediss://`         | Connect + `PING` (`rediss://` for TLS)    |
 | `grpc://`, `grpcs://`           | `grpc.health.v1.Health/Check` unary (optional `/Service` path) |
+| `log:///path?match=...`         | Wait for a substring or regex to appear in a local log file (last 1 MiB) |
 | `exec://program?arg=...`        | External command, ready iff exit `0`      |
 
 ## Feature flags

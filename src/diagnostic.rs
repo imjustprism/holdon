@@ -60,6 +60,8 @@ pub enum StageKind {
     Exec,
     /// gRPC `Health/Check` unary call.
     Grpc,
+    /// Log file content match for `log://` targets.
+    Log,
 }
 
 /// Outcome of a single [`Stage`].
@@ -123,6 +125,7 @@ impl StageKind {
             Self::Mysql => "mysql",
             Self::Exec => "exec",
             Self::Grpc => "grpc",
+            Self::Log => "log",
         }
     }
 }
@@ -139,6 +142,7 @@ impl fmt::Display for StageKind {
             Self::Mysql => "MySQL query",
             Self::Exec => "external command",
             Self::Grpc => "gRPC health",
+            Self::Log => "log file match",
         })
     }
 }

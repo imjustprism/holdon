@@ -57,6 +57,10 @@ pub(crate) mod hints {
     pub(crate) const EXEC_NONZERO: &str = "command reported not-ready, will retry";
     pub(crate) const EXEC_TIMED_OUT: &str =
         "child did not finish before attempt timeout, increase --attempt-timeout";
+    pub(crate) const LOG_NOT_YET: &str =
+        "pattern not yet in log, app may still be starting; will keep checking";
+    pub(crate) const LOG_PATH: &str =
+        "log file is missing, check the path and that the producer has started writing";
 }
 
 impl Hintable for std::io::Error {

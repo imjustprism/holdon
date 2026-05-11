@@ -24,5 +24,5 @@ pub mod util;
 
 pub use error::{Error, Result};
 pub use runner::{Direction, Event, Report, Runner, RunnerConfig, Schedule, TargetReport};
-pub use target::{Hostname, Target};
+pub use target::{Hostname, LogMatcher, Target};
 pub use util::parse_duration;
