@@ -22,8 +22,8 @@ pub(super) async fn probe(url: &Url, ctx: AttemptCtx) -> Vec<Stage> {
         Ok(Err(e)) => {
             let mut msg = format_error_chain(&e);
             if !pw.is_empty() {
-                msg = redact_in(&msg, &pw);
                 msg = redact_in(&msg, &conn_str);
+                msg = redact_in(&msg, &pw);
             }
             let hint = hint_for(&msg);
             err_stage(StageKind::Mongodb, start.elapsed(), msg, Some(hint))
@@ -59,7 +59,10 @@ fn hint_for(msg: &str) -> &'static str {
     let lower = msg.to_ascii_lowercase();
     if lower.contains("authentication") || lower.contains("auth failed") {
         hints::MONGODB_AUTH
-    } else if lower.contains("no primary") || lower.contains("replica set") {
+    } else if lower.contains("no primary")
+        || lower.contains("replicasetnoprimary")
+        || lower.contains("replica set")
+    {
         hints::MONGODB_NO_PRIMARY
     } else if lower.contains("tls") || lower.contains("certificate") {
         hints::MONGODB_TLS
@@ -84,6 +87,10 @@ mod tests {
         assert_eq!(hint_for("no primary available"), hints::MONGODB_NO_PRIMARY);
         assert_eq!(
             hint_for("replica set election in progress"),
+            hints::MONGODB_NO_PRIMARY
+        );
+        assert_eq!(
+            hint_for("Kind: ReplicaSetNoPrimary"),
             hints::MONGODB_NO_PRIMARY
         );
     }
