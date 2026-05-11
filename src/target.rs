@@ -120,19 +120,6 @@ pub enum Target {
         /// Full `MySQL` connection URL.
         url: Url,
     },
-    /// gRPC `grpc.health.v1.Health/Check` against the target endpoint.
-    ///
-    /// Parsed from `grpc://host:port[/Service]` (plaintext) or
-    /// `grpcs://host:port[/Service]` (TLS via rustls). Path component selects
-    /// the gRPC service name to check. Empty path means overall server health.
-    /// Behind the `grpc` feature.
-    Grpc {
-        /// Endpoint URL (`grpc://` or `grpcs://`).
-        url: Url,
-        /// gRPC service name passed in `HealthCheckRequest.service`. Empty
-        /// string means "overall server" per the protocol.
-        service: String,
-    },
     /// Run an external command, ready iff it exits 0.
     ///
     /// Parsed from `exec://<program>[?arg=...&arg=...]`. The program may be a
@@ -149,6 +136,19 @@ pub enum Target {
         program: PathBuf,
         /// Arguments, in order. Never split or shell-expanded.
         args: Vec<String>,
+    },
+    /// gRPC `grpc.health.v1.Health/Check` against the target endpoint.
+    ///
+    /// Parsed from `grpc://host:port[/Service]` (plaintext) or
+    /// `grpcs://host:port[/Service]` (TLS via rustls). Path component selects
+    /// the gRPC service name to check. Empty path means overall server health.
+    /// Behind the `grpc` feature.
+    Grpc {
+        /// Endpoint URL (`grpc://` or `grpcs://`).
+        url: Url,
+        /// gRPC service name passed in `HealthCheckRequest.service`. Empty
+        /// string means "overall server" per the protocol.
+        service: String,
     },
 }
 

@@ -56,10 +56,10 @@ pub enum StageKind {
     Redis,
     /// `MySQL` connect plus `SELECT 1`.
     Mysql,
-    /// gRPC `Health/Check` unary call.
-    Grpc,
     /// External command invocation for `exec://` targets.
     Exec,
+    /// gRPC `Health/Check` unary call.
+    Grpc,
 }
 
 /// Outcome of a single [`Stage`].
@@ -121,8 +121,8 @@ impl StageKind {
             Self::Postgres => "postgres",
             Self::Redis => "redis",
             Self::Mysql => "mysql",
-            Self::Grpc => "grpc",
             Self::Exec => "exec",
+            Self::Grpc => "grpc",
         }
     }
 }
@@ -137,8 +137,8 @@ impl fmt::Display for StageKind {
             Self::Postgres => "Postgres query",
             Self::Redis => "Redis PING",
             Self::Mysql => "MySQL query",
-            Self::Grpc => "gRPC health",
             Self::Exec => "external command",
+            Self::Grpc => "gRPC health",
         })
     }
 }
