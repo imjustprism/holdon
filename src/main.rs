@@ -121,6 +121,8 @@ async fn run(args: Args) -> Result<ExitStatus> {
             insecure: args.insecure,
             follow_redirects: !args.no_follow_redirects,
             body_substring: args.expect_body.clone(),
+            body_regex: args.expect_body_regex.clone(),
+            body_json_match: args.expect_json.clone(),
             extra_ca_pem,
             min_tls: args.tls_min.into(),
         });

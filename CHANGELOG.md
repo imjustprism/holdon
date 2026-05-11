@@ -8,6 +8,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- HTTP `--expect-body-regex <PATTERN>` to require the response body to
+  match a regex. Uses `regex-lite` for a small binary footprint.
+- HTTP `--expect-json <POINTER=VALUE>` to require an RFC 6901 JSON
+  pointer (e.g. `/status=UP`, `/data/healthy=true`) to equal a literal
+  value. Strings, booleans, and numbers match by their JSON form.
+- Multiple body matchers compose: substring + regex + JSON pointer all
+  must hold when set together.
 - HTTP probe surfaces a sanitized body snippet (up to 240 chars) and the
   upstream `Server` / `X-Powered-By` / `Via` headers when the response
   status falls outside the expected range. Output now reads

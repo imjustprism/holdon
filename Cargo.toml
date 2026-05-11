@@ -35,7 +35,7 @@ path = "src/lib.rs"
 
 [features]
 default = ["http", "json-output"]
-http = ["dep:reqwest"]
+http = ["dep:reqwest", "dep:regex-lite", "dep:serde_json"]
 postgres = ["dep:tokio-postgres", "dep:tokio-postgres-rustls", "dep:rustls", "dep:webpki-roots"]
 redis = ["dep:redis"]
 mysql = ["dep:mysql_async", "dep:rustls", "dep:webpki-roots"]
@@ -82,6 +82,7 @@ reqwest = { version = "0.12", default-features = false, features = [
   "rustls-tls-webpki-roots",
   "http2",
 ], optional = true }
+regex-lite = { version = "0.1", default-features = false, features = ["std", "string"], optional = true }
 tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"], optional = true }
 tokio-postgres-rustls = { version = "0.13", default-features = false, optional = true }
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"], optional = true }

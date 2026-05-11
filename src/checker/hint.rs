@@ -45,6 +45,10 @@ pub(crate) mod hints {
     pub(crate) const HTTP_RETRY: &str = "service may still be initializing";
     pub(crate) const HTTP_BODY_MISMATCH: &str =
         "response status was acceptable but the body did not match --expect-body";
+    pub(crate) const HTTP_BODY_REGEX_MISMATCH: &str =
+        "response status was acceptable but the body did not match --expect-body-regex";
+    pub(crate) const HTTP_JSON_MISMATCH: &str =
+        "JSON body shape or value did not match --expect-json";
     pub(crate) const DNS_HINT: &str = "check hostname spelling and DNS server";
     pub(crate) const FILE_IO: &str = "permission or IO error reading the path";
     pub(crate) const EXEC_NOT_FOUND: &str =
