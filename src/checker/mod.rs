@@ -18,6 +18,8 @@ pub mod http;
 #[cfg(feature = "influxdb")]
 mod influxdb;
 mod log;
+#[cfg(feature = "mongodb")]
+mod mongodb;
 #[cfg(feature = "mysql")]
 mod mysql;
 #[cfg(feature = "postgres")]
@@ -85,6 +87,10 @@ impl Target {
             Self::Influxdb { url } => influxdb::probe(url, ctx).await,
             #[cfg(not(feature = "influxdb"))]
             Self::Influxdb { .. } => disabled_stage(StageKind::Influxdb, "influxdb"),
+            #[cfg(feature = "mongodb")]
+            Self::Mongodb { url } => mongodb::probe(url, ctx).await,
+            #[cfg(not(feature = "mongodb"))]
+            Self::Mongodb { .. } => disabled_stage(StageKind::Mongodb, "mongodb"),
         };
         let ok = stages
             .last()

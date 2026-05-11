@@ -12,6 +12,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   InfluxDB v1 and v2). Optional `?expect-version=1|2` checks the
   `X-Influxdb-Version` response header major. Behind the new `influxdb`
   cargo feature (depends on `http`). Bundled in `full`.
+- `mongodb://` and `mongodb+srv://` probe. Parses the connection string
+  via the official `mongodb` driver, runs admin `{ ping: 1 }`. SRV
+  discovery via DNS, TLS through `?tls=true`. Operator hints for auth
+  failure, no-primary, and TLS handshake errors. Password redacted in
+  `Display`, `Debug`, and every error path. Behind the new `mongodb`
+  cargo feature. Included in `all-databases` and `full`.
 
 ## [0.1.2] - 2026-05-11
 

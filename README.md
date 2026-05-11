@@ -101,6 +101,8 @@ are opt-in to keep the default binary small.
 | `http`          | HTTP / HTTPS probes (rustls)               |
 | `postgres`      | Postgres probe via `tokio-postgres` + rustls |
 | `mysql`         | `MySQL` / `MariaDB` probe via `mysql_async` + rustls |
+| `mongodb`       | `MongoDB` probe via `mongodb` driver + rustls (SRV-aware) |
+| `mongodb`       | `MongoDB` probe via `mongodb` driver + rustls (SRV-aware) |
 | `grpc`          | gRPC `Health/Check` probe via `tonic` + rustls |
 | `influxdb`      | `InfluxDB` `/ping` probe (depends on `http`) |
 | `redis`         | Redis probe via `redis` crate + rustls     |

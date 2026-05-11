@@ -64,6 +64,8 @@ pub enum StageKind {
     Log,
     /// `InfluxDB` `/ping` health probe for `influxdb://` targets.
     Influxdb,
+    /// `MongoDB` connect plus admin `ping` command.
+    Mongodb,
 }
 
 /// Outcome of a single [`Stage`].
@@ -129,6 +131,7 @@ impl StageKind {
             Self::Grpc => "grpc",
             Self::Log => "log",
             Self::Influxdb => "influxdb",
+            Self::Mongodb => "mongodb",
         }
     }
 }
@@ -147,6 +150,7 @@ impl fmt::Display for StageKind {
             Self::Grpc => "gRPC health",
             Self::Log => "log file match",
             Self::Influxdb => "InfluxDB ping",
+            Self::Mongodb => "MongoDB ping",
         })
     }
 }
