@@ -35,7 +35,7 @@ pub async fn free_port() -> u16 {
         .await
         {
             Ok(Err(_)) | Err(_) => return p,
-            Ok(Ok(_)) => continue,
+            Ok(Ok(_)) => {}
         }
     }
     panic!("could not obtain a verified-closed port after 20 attempts");
