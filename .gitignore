@@ -1,5 +1,6 @@
 /target
 Cargo.lock.bak
+/.claude/
 
 # project-local agent rules, not for upstream
 /.rules
