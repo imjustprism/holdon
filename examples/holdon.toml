@@ -1,0 +1,22 @@
+# Example holdon configuration file.
+#
+# Usage:
+#   holdon --config examples/holdon.toml
+#
+# Auto-detection: holdon picks up `holdon.toml` or `.holdon.toml` from the
+# current directory when no --config flag is given. Explicit CLI flags always
+# win over both this file and the built-in defaults.
+
+# Defaults (all optional). Durations accept `200ms`, `5s`, `2m`, `1h`.
+interval = "200ms"
+timeout = "60s"
+attempt_timeout = "5s"
+max_interval = "2s"
+success_threshold = 2
+
+# Targets to wait for, appended to anything passed on the CLI.
+targets = [
+  "tcp://db:5432",
+  "https://api.local/health",
+  "redis://cache:6379",
+]

@@ -104,6 +104,14 @@ pub(crate) struct Args {
     #[arg(value_name = "TARGET")]
     pub(crate) targets: Vec<String>,
 
+    #[arg(
+        long,
+        value_name = "PATH",
+        env = "HOLDON_CONFIG",
+        help = "Load defaults and additional targets from a TOML file"
+    )]
+    pub(crate) config: Option<std::path::PathBuf>,
+
     #[arg(long, short = 't', env = "HOLDON_TIMEOUT", value_parser = holdon::parse_duration, default_value = "30s")]
     pub(crate) timeout: Duration,
 
