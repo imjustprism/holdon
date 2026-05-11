@@ -87,6 +87,7 @@ holdon exec:///usr/local/bin/check.sh     # custom readiness command
 | `postgres://`, `postgresql://`  | Connect + `SELECT 1` (TLS by default)     |
 | `mysql://`, `mariadb://`        | Connect + `SELECT 1` (TLS by default)     |
 | `redis://`, `rediss://`         | Connect + `PING` (`rediss://` for TLS)    |
+| `grpc://`, `grpcs://`           | `grpc.health.v1.Health/Check` unary (optional `/Service` path) |
 | `exec://program?arg=...`        | External command, ready iff exit `0`      |
 
 ## Feature flags
@@ -99,6 +100,7 @@ are opt-in to keep the default binary small.
 | `http`          | HTTP / HTTPS probes (rustls)               |
 | `postgres`      | Postgres probe via `tokio-postgres` + rustls |
 | `mysql`         | `MySQL` / `MariaDB` probe via `mysql_async` + rustls |
+| `grpc`          | gRPC `Health/Check` probe via `tonic` + rustls |
 | `redis`         | Redis probe via `redis` crate + rustls     |
 | `json-output`   | `--output json` line-delimited events      |
 | `all-databases` | `postgres` + `mysql` + `redis`             |

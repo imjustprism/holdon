@@ -30,6 +30,18 @@ pub(crate) mod hints {
         "TLS negotiation failed, pass ?ssl-mode=disable for plaintext or check the server cert";
     pub(crate) const MYSQL_HOST_BLOCKED: &str =
         "server blocked this host (too many connection errors); FLUSH HOSTS on the server";
+    pub(crate) const GRPC_NOT_SERVING: &str =
+        "server reachable but reporting NOT_SERVING; app likely still warming up";
+    pub(crate) const GRPC_UNIMPLEMENTED: &str =
+        "server does not implement grpc.health.v1.Health; check the service is registered";
+    pub(crate) const GRPC_SERVICE_UNKNOWN: &str =
+        "server is up but does not know this service name; check the URL path";
+    pub(crate) const GRPC_AUTH: &str = "missing or invalid credentials for the health endpoint";
+    pub(crate) const GRPC_TLS: &str =
+        "TLS handshake failed for grpcs://; verify server cert and SNI";
+    pub(crate) const GRPC_UNAVAILABLE: &str = "server transient unavailable; will keep retrying";
+    pub(crate) const GRPC_DEADLINE: &str =
+        "server did not respond in time; raise --attempt-timeout";
     pub(crate) const HTTP_RETRY: &str = "service may still be initializing";
     pub(crate) const HTTP_BODY_MISMATCH: &str =
         "response status was acceptable but the body did not match --expect-body";

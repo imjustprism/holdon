@@ -8,6 +8,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- gRPC `Health/Check` probe via `tonic` + rustls. URL forms `grpc://host:port`
+  or `grpcs://host:port` for TLS, with optional `/Service` path to select a
+  specific service. Behind the `mysql`-style `grpc` cargo feature, bundled in
+  `full`. Operator hints for `NOT_SERVING`, `UNIMPLEMENTED`, unknown service,
+  TLS handshake failure, and auth.
+
+### Added
+
 - Shell completion script generation via hidden flag
   `--generate-completion <bash|zsh|fish|power-shell|elvish>` (writes to
   stdout). Man page generation via `--generate-manpage`. Both are bundled
