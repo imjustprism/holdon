@@ -325,7 +325,7 @@ fn encode_arg(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
-            '&' | '=' | '?' | '#' | '%' | ' ' => {
+            '&' | '=' | '?' | '#' | '%' | ' ' | '+' => {
                 for b in c.to_string().bytes() {
                     let _ = write!(out, "%{b:02X}");
                 }
@@ -857,7 +857,7 @@ mod tests {
         let t: Target = "log:///tmp/app.log?match=Listening".parse().unwrap();
         match t {
             Target::Log { path, matcher } => {
-                assert_eq!(path, std::path::PathBuf::from("/tmp/app.log"));
+                assert_eq!(path, PathBuf::from("/tmp/app.log"));
                 assert!(matches!(matcher, LogMatcher::Substring(ref s) if s == "Listening"));
             }
             _ => panic!("expected Log"),
