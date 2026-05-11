@@ -15,8 +15,4 @@ max_interval = "2s"
 success_threshold = 2
 
 # Targets to wait for, appended to anything passed on the CLI.
-targets = [
-  "tcp://db:5432",
-  "https://api.local/health",
-  "redis://cache:6379",
-]
+targets = ["tcp://db:5432", "https://api.local/health", "redis://cache:6379"]

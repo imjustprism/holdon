@@ -70,7 +70,7 @@ async fn run(args: Args) -> Result<ExitStatus> {
     let config_data = config::load(args.config.as_deref())?;
 
     let mut raw_targets = collect_target_inputs(&args.targets)?;
-    raw_targets.extend(config_data.targets.iter().cloned());
+    append_config_targets(&mut raw_targets, &config_data.targets)?;
     let mut targets: Vec<Target> = raw_targets
         .iter()
         .map(|s| {
@@ -288,19 +288,20 @@ pub(crate) const MAX_TARGETS: usize = 10_000;
 pub(crate) const MAX_TARGET_LEN: usize = 2048;
 const UTF8_BOM: &str = "\u{feff}";
 
+fn push_validated(out: &mut Vec<String>, s: String) -> Result<()> {
+    if s.len() > MAX_TARGET_LEN {
+        bail!("target string exceeds {MAX_TARGET_LEN} bytes");
+    }
+    if out.len() >= MAX_TARGETS {
+        bail!("too many targets (max {MAX_TARGETS})");
+    }
+    out.push(s);
+    Ok(())
+}
+
 fn collect_target_inputs(args: &[String]) -> Result<Vec<String>> {
     use std::io::BufRead;
     let mut out = Vec::with_capacity(args.len());
-    let mut push = |s: String| -> Result<()> {
-        if s.len() > MAX_TARGET_LEN {
-            bail!("target string exceeds {MAX_TARGET_LEN} bytes");
-        }
-        if out.len() >= MAX_TARGETS {
-            bail!("too many targets (max {MAX_TARGETS})");
-        }
-        out.push(s);
-        Ok(())
-    };
     for a in args {
         if a == "-" {
             let stdin = std::io::stdin();
@@ -315,14 +316,21 @@ fn collect_target_inputs(args: &[String]) -> Result<Vec<String>> {
                 }
                 let trimmed = line.trim();
                 if !trimmed.is_empty() && !trimmed.starts_with('#') {
-                    push(trimmed.to_owned())?;
+                    push_validated(&mut out, trimmed.to_owned())?;
                 }
             }
         } else {
-            push(a.clone())?;
+            push_validated(&mut out, a.clone())?;
         }
     }
     Ok(out)
+}
+
+fn append_config_targets(out: &mut Vec<String>, config_targets: &[String]) -> Result<()> {
+    for t in config_targets {
+        push_validated(out, t.clone())?;
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
