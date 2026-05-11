@@ -36,6 +36,18 @@ hint: service may still be initializing
 
 Minimum supported Rust version: **1.85**.
 
+## Shell completions and man page
+
+```sh
+holdon --generate-completion bash    > /etc/bash_completion.d/holdon
+holdon --generate-completion zsh     > ~/.zsh/completions/_holdon
+holdon --generate-completion fish    > ~/.config/fish/completions/holdon.fish
+holdon --generate-completion power-shell  | iex
+holdon --generate-manpage             > /usr/local/share/man/man1/holdon.1
+```
+
+Prebuilt copies of every shell's completion script plus the man page are attached to each [GitHub Release](https://github.com/imjustprism/holdon/releases) as `holdon-completions-and-manpage.tar.gz`.
+
 ## Config file
 
 Pass `--config holdon.toml`, or drop `holdon.toml` / `.holdon.toml` next to where you run `holdon` and it's auto-detected.

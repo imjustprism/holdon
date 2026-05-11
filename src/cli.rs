@@ -1,10 +1,48 @@
 use std::time::Duration;
 
-use clap::{Parser, ValueEnum};
+use clap::{CommandFactory, Parser, ValueEnum};
 #[cfg(feature = "http")]
 use holdon::checker::http::{HeaderName, HeaderValue, Method};
 
 use crate::output::Format;
+
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+pub(crate) enum CompletionShell {
+    Bash,
+    Zsh,
+    Fish,
+    PowerShell,
+    Elvish,
+}
+
+impl From<CompletionShell> for clap_complete::Shell {
+    fn from(s: CompletionShell) -> Self {
+        match s {
+            CompletionShell::Bash => Self::Bash,
+            CompletionShell::Zsh => Self::Zsh,
+            CompletionShell::Fish => Self::Fish,
+            CompletionShell::PowerShell => Self::PowerShell,
+            CompletionShell::Elvish => Self::Elvish,
+        }
+    }
+}
+
+pub(crate) fn print_completion(shell: CompletionShell) {
+    let mut cmd = Args::command();
+    let name = cmd.get_name().to_string();
+    clap_complete::generate(
+        clap_complete::Shell::from(shell),
+        &mut cmd,
+        name,
+        &mut std::io::stdout(),
+    );
+}
+
+pub(crate) fn print_manpage() -> std::io::Result<()> {
+    let cmd = Args::command();
+    let man = clap_mangen::Man::new(cmd);
+    man.render(&mut std::io::stdout())
+}
 
 #[cfg(feature = "http")]
 #[derive(Debug, Clone, Copy, ValueEnum, Default, PartialEq, Eq)]
@@ -111,6 +149,22 @@ pub(crate) struct Args {
         help = "Load defaults and additional targets from a TOML file"
     )]
     pub(crate) config: Option<std::path::PathBuf>,
+
+    #[arg(
+        long = "generate-completion",
+        value_name = "SHELL",
+        value_enum,
+        hide = true,
+        help = "Print a shell completion script to stdout and exit"
+    )]
+    pub(crate) generate_completion: Option<CompletionShell>,
+
+    #[arg(
+        long = "generate-manpage",
+        hide = true,
+        help = "Print the man page to stdout and exit"
+    )]
+    pub(crate) generate_manpage: bool,
 
     #[arg(long, short = 't', env = "HOLDON_TIMEOUT", value_parser = holdon::parse_duration, default_value = "30s")]
     pub(crate) timeout: Duration,

@@ -64,6 +64,8 @@ clap = { version = "4.5", default-features = false, features = [
   "color",
   "env",
 ] }
+clap_complete = { version = "4.5", default-features = false }
+clap_mangen = { version = "0.2", default-features = false }
 thiserror = { version = "2.0", default-features = false }
 anyhow = { version = "1.0", default-features = false, features = ["std"] }
 owo-colors = { version = "4.1", default-features = false, features = ["supports-colors"] }

@@ -107,6 +107,36 @@ jobs:
           path: dist/holdon-${{ matrix.target }}.*
           if-no-files-found: error
 
+  completions:
+    name: completions and manpage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: build
+        run: cargo build --release --locked --all-features
+      - name: generate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/completions out/man
+          bin="./target/release/holdon"
+          for sh in bash zsh fish power-shell elvish; do
+            case "$sh" in
+              power-shell) name="powershell"; ext="ps1" ;;
+              *) name="$sh"; ext="$sh" ;;
+            esac
+            "$bin" --generate-completion "$sh" > "out/completions/holdon.${ext}"
+          done
+          "$bin" --generate-manpage > "out/man/holdon.1"
+          (cd out && tar -czf ../holdon-completions-and-manpage.tar.gz completions man)
+      - uses: actions/upload-artifact@v7
+        with:
+          name: completions-and-manpage
+          path: holdon-completions-and-manpage.tar.gz
+          if-no-files-found: error
+
   sbom:
     name: sbom
     runs-on: ubuntu-latest
@@ -135,7 +165,7 @@ jobs:
 
   release:
     name: github release
-    needs: [build, sbom]
+    needs: [build, sbom, completions]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

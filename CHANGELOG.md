@@ -8,6 +8,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Shell completion script generation via hidden flag
+  `--generate-completion <bash|zsh|fish|power-shell|elvish>` (writes to
+  stdout). Man page generation via `--generate-manpage`. Both are bundled
+  as `holdon-completions-and-manpage.tar.gz` in every GitHub Release.
 - TOML configuration file via `--config <PATH>` (or env `HOLDON_CONFIG`).
   Auto-detects `holdon.toml` / `.holdon.toml` in the current directory when
   no flag is given. Supports global defaults (`interval`, `timeout`,

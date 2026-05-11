@@ -56,6 +56,18 @@ impl ExitStatus {
 async fn main() -> ExitCode {
     let args = Args::parse();
 
+    if let Some(shell) = args.generate_completion {
+        cli::print_completion(shell);
+        return ExitCode::from(EXIT_READY);
+    }
+    if args.generate_manpage {
+        if let Err(e) = cli::print_manpage() {
+            eprintln!("holdon: writing manpage: {e}");
+            return ExitCode::from(ExitStatus::Misuse.code());
+        }
+        return ExitCode::from(EXIT_READY);
+    }
+
     match run(args).await {
         Ok(code) => ExitCode::from(code.code()),
         Err(e) => {
