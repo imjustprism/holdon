@@ -45,7 +45,7 @@ pub(super) async fn probe(
 async fn run(uri: &str, queue: Option<&str>, exchange: Option<&str>) -> lapin::Result<()> {
     let conn = Connection::connect(uri, ConnectionProperties::default()).await?;
     let result = declare_checks(&conn, queue, exchange).await;
-    let _ = conn.close(0, "ok").await;
+    let _ = conn.close(200, "ok").await;
     result
 }
 

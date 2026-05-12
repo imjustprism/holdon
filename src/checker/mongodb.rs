@@ -3,7 +3,6 @@ use std::time::Instant;
 use mongodb::Client;
 use mongodb::bson::doc;
 use mongodb::options::ClientOptions;
-use tokio::time::timeout;
 use url::Url;
 
 use super::hint::hints;
@@ -16,9 +15,9 @@ pub(super) async fn probe(url: &Url, ctx: AttemptCtx) -> Vec<Stage> {
     let start = Instant::now();
     let pw = url.password().unwrap_or("").to_owned();
     let conn_str = url.as_str().to_owned();
-    let stage = match timeout(ctx.attempt_timeout, ping(&conn_str)).await {
-        Ok(Ok(())) => ok_stage(StageKind::Mongodb, start.elapsed()),
-        Ok(Err(e)) => {
+    let stage = match ping(&conn_str, ctx).await {
+        Ok(()) => ok_stage(StageKind::Mongodb, start.elapsed()),
+        Err(e) => {
             let mut msg = format_error_chain(&e);
             if !pw.is_empty() {
                 msg = redact_in(&msg, &conn_str);
@@ -27,18 +26,14 @@ pub(super) async fn probe(url: &Url, ctx: AttemptCtx) -> Vec<Stage> {
             let hint = hint_for(&msg);
             err_stage(StageKind::Mongodb, start.elapsed(), msg, Some(hint))
         }
-        Err(_) => err_stage(
-            StageKind::Mongodb,
-            ctx.attempt_timeout,
-            hints::TIMED_OUT,
-            Some(hints::MONGODB_NOT_READY),
-        ),
     };
     vec![stage]
 }
 
-async fn ping(uri: &str) -> mongodb::error::Result<()> {
-    let opts = ClientOptions::parse(uri).await?;
+async fn ping(uri: &str, ctx: AttemptCtx) -> mongodb::error::Result<()> {
+    let mut opts = ClientOptions::parse(uri).await?;
+    opts.connect_timeout = Some(ctx.attempt_timeout);
+    opts.server_selection_timeout = Some(ctx.attempt_timeout);
     let client = Client::with_options(opts)?;
     client
         .database("admin")
