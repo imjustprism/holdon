@@ -84,10 +84,8 @@ async fn read_tail(path: &Path) -> Result<String, LogReadError> {
     }
     let cap = usize::try_from(LOG_TAIL_BYTES.min(len)).unwrap_or(usize::MAX);
     let mut buf = Vec::with_capacity(cap);
-    // Bound the read at the computed cap so an actively-appended log cannot
-    // make a single attempt over-read past the intended 1 MiB tail window.
-    let mut limited = file.take(LOG_TAIL_BYTES);
-    limited
+    let mut bounded = file.take(LOG_TAIL_BYTES);
+    bounded
         .read_to_end(&mut buf)
         .await
         .map_err(|e| LogReadError::Io(e.to_string()))?;

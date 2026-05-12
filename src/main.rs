@@ -132,8 +132,6 @@ async fn run(args: Args) -> Result<ExitStatus> {
         bail!("no targets given");
     }
 
-    // CLI > config file > hardcoded default. A CLI value equal to the
-    // hardcoded default is treated as "unset" so the config file can override.
     let merge_dur = |cli: Duration, cli_default: Duration, conf: Option<Duration>| -> Duration {
         if cli == cli_default {
             conf.unwrap_or(cli)
