@@ -4,7 +4,7 @@
 #   docker build -t holdon .
 #   docker run --rm holdon postgres://db:5432 https://api/health
 
-FROM --platform=$BUILDPLATFORM rust:1.85-alpine AS builder
+FROM rust:1.85-alpine AS builder
 ARG TARGETARCH
 RUN apk add --no-cache musl-dev pkgconfig
 WORKDIR /src
