@@ -1,4 +1,3 @@
-use std::sync::OnceLock;
 use std::time::Instant;
 
 use mongodb::Client;
@@ -8,12 +7,12 @@ use tokio::time::timeout;
 use url::Url;
 
 use super::hint::hints;
-use super::{AttemptCtx, err_stage, ok_stage};
+use super::{AttemptCtx, err_stage, install_rustls_provider_once, ok_stage};
 use crate::diagnostic::{Stage, StageKind};
 use crate::util::{format_error_chain, redact_in};
 
 pub(super) async fn probe(url: &Url, ctx: AttemptCtx) -> Vec<Stage> {
-    install_provider_once();
+    install_rustls_provider_once();
     let start = Instant::now();
     let pw = url.password().unwrap_or("").to_owned();
     let conn_str = url.as_str().to_owned();
@@ -46,13 +45,6 @@ async fn ping(uri: &str) -> mongodb::error::Result<()> {
         .run_command(doc! { "ping": 1 })
         .await?;
     Ok(())
-}
-
-fn install_provider_once() {
-    static ONCE: OnceLock<()> = OnceLock::new();
-    ONCE.get_or_init(|| {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    });
 }
 
 fn hint_for(msg: &str) -> &'static str {

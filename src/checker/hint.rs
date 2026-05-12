@@ -84,6 +84,14 @@ pub(crate) mod hints {
         "queue or exchange does not exist on the broker, check name and vhost";
     pub(crate) const RABBITMQ_TLS: &str =
         "tls handshake failed, check amqps:// and CA cert configuration";
+    pub(crate) const KAFKA_NOT_READY: &str =
+        "kafka broker slow, not yet listening, or controller not elected";
+    pub(crate) const KAFKA_TOPIC_MISSING: &str =
+        "topic not found in broker metadata, check name or autocreate setting";
+    pub(crate) const KAFKA_PARTITION_COUNT: &str =
+        "topic has fewer partitions than required by ?expect-partitions";
+    pub(crate) const KAFKA_TLS: &str =
+        "tls handshake failed, check kafkas:// and CA cert configuration";
 }
 
 impl Hintable for std::io::Error {
