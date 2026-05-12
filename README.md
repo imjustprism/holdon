@@ -113,7 +113,7 @@ are opt-in to keep the default binary small.
 | `influxdb`      | `InfluxDB` `/ping` probe (depends on `http`) |
 | `redis`         | Redis probe via `redis` crate + rustls     |
 | `json-output`   | `--output json` line-delimited events      |
-| `all-databases` | `postgres` + `mysql` + `redis`             |
+| `all-databases` | `postgres` + `mysql` + `redis` + `mongodb` |
 | `full`          | Everything above                           |
 
 ## Exit codes
