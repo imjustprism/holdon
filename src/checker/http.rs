@@ -80,6 +80,10 @@ pub struct HttpConfig {
     pub extra_ca_pem: Vec<Vec<u8>>,
     /// Minimum TLS protocol version. Defaults to TLS 1.2.
     pub min_tls: TlsMin,
+    /// Optional request body. Sent verbatim with `Content-Type:
+    /// application/octet-stream` unless the caller supplies a `Content-Type`
+    /// header via [`HttpConfig::headers`].
+    pub body: Option<Vec<u8>>,
 }
 
 impl HttpConfig {
@@ -166,6 +170,12 @@ pub(super) async fn probe(url: &Url, expect: &StatusRange, ctx: AttemptCtx) -> V
     let mut req = client().request(cfg.method.clone(), url.clone());
     if !cfg.headers.is_empty() {
         req = req.headers(cfg.headers.clone());
+    }
+    if let Some(body) = &cfg.body {
+        req = req.body(body.clone());
+        if !cfg.headers.contains_key(reqwest::header::CONTENT_TYPE) {
+            req = req.header(reqwest::header::CONTENT_TYPE, "application/octet-stream");
+        }
     }
     let stage = match req.timeout(ctx.attempt_timeout).send().await {
         Ok(resp) => {

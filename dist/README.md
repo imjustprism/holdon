@@ -13,8 +13,6 @@ auto-bump in `.github/workflows/release.yml`.
 | Homebrew | `homebrew/holdon.rb` | `imjustprism/homebrew-holdon` | `dawidd6/action-homebrew-bump-formula` |
 | Scoop | `scoop/holdon.json` | `imjustprism/scoop-holdon` | inline shell step in `release.yml` |
 | Winget | _generated at release time_ | `microsoft/winget-pkgs` (PR) | `vedantmgoyal2009/winget-releaser` |
-| AUR | `aur/PKGBUILD` | `aur.archlinux.org/holdon-bin.git` | `KSXGitHub/github-actions-deploy-aur` |
-| nixpkgs | `nix/default.nix` | `NixOS/nixpkgs` (manual PR) | none (manual) |
 
 ## End-user install matrix
 
@@ -34,12 +32,6 @@ scoop install holdon
 
 # Winget (Windows)
 winget install imjustprism.holdon
-
-# AUR (Arch)
-yay -S holdon-bin
-
-# nixpkgs (NixOS, nix-darwin)
-nix-shell -p holdon
 
 # Docker
 docker pull ghcr.io/imjustprism/holdon
