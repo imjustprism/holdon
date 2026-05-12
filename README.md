@@ -91,6 +91,7 @@ holdon exec:///usr/local/bin/check.sh     # custom readiness command
 | `mongodb://`, `mongodb+srv://`  | Connect + admin `ping` command (SRV-aware)  |
 | `amqp://`, `amqps://`           | `RabbitMQ` AMQP connect, optional `?queue=` / `?exchange=` passive declare |
 | `kafka://`, `kafkas://`         | Kafka broker Metadata fetch, optional `?topic=` and `?expect-partitions=` |
+| `temporal://`, `temporals://`   | Temporal server gRPC `Health/Check` on `WorkflowService` |
 | `log:///path?match=...`         | Wait for a substring or regex to appear in a local log file (last 1 MiB) |
 | `exec://program?arg=...`        | External command, ready iff exit `0`      |
 
@@ -107,6 +108,7 @@ are opt-in to keep the default binary small.
 | `mongodb`       | `MongoDB` probe via `mongodb` driver + rustls (SRV-aware) |
 | `rabbitmq`      | `RabbitMQ` AMQP probe via `lapin` + rustls (optional queue/exchange check) |
 | `kafka`         | Kafka Metadata probe via pure-Rust `rskafka` + rustls (optional topic/partition check) |
+| `temporal`      | Temporal server gRPC `Health/Check` probe (depends on `grpc`) |
 | `grpc`          | gRPC `Health/Check` probe via `tonic` + rustls |
 | `influxdb`      | `InfluxDB` `/ping` probe (depends on `http`) |
 | `redis`         | Redis probe via `redis` crate + rustls     |

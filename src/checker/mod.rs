@@ -31,6 +31,8 @@ mod rabbitmq;
 #[cfg(feature = "redis")]
 mod redis;
 mod tcp;
+#[cfg(feature = "temporal")]
+mod temporal;
 
 pub(crate) use hint::{Hintable, hints};
 
@@ -111,6 +113,10 @@ impl Target {
             } => kafka::probe(url, topic.as_deref(), *min_partitions, ctx).await,
             #[cfg(not(feature = "kafka"))]
             Self::Kafka { .. } => disabled_stage(StageKind::Kafka, "kafka"),
+            #[cfg(feature = "temporal")]
+            Self::Temporal { url } => temporal::probe(url, ctx).await,
+            #[cfg(not(feature = "temporal"))]
+            Self::Temporal { .. } => disabled_stage(StageKind::Temporal, "temporal"),
         };
         let ok = stages
             .last()

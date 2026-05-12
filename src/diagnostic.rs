@@ -70,6 +70,8 @@ pub enum StageKind {
     Rabbitmq,
     /// `Kafka` broker metadata fetch (optionally checks topic + partition count).
     Kafka,
+    /// `Temporal` server gRPC `Health/Check` against `WorkflowService`.
+    Temporal,
 }
 
 /// Outcome of a single [`Stage`].
@@ -138,6 +140,7 @@ impl StageKind {
             Self::Mongodb => "mongodb",
             Self::Rabbitmq => "rabbitmq",
             Self::Kafka => "kafka",
+            Self::Temporal => "temporal",
         }
     }
 }
@@ -159,6 +162,7 @@ impl fmt::Display for StageKind {
             Self::Mongodb => "MongoDB ping",
             Self::Rabbitmq => "RabbitMQ AMQP",
             Self::Kafka => "Kafka metadata",
+            Self::Temporal => "Temporal health",
         })
     }
 }

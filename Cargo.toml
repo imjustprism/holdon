@@ -44,9 +44,22 @@ influxdb = ["http"]
 mongodb = ["dep:mongodb", "dep:rustls", "dep:webpki-roots"]
 rabbitmq = ["dep:lapin", "dep:rustls", "dep:webpki-roots"]
 kafka = ["dep:rskafka", "dep:rustls", "dep:webpki-roots"]
+temporal = ["grpc"]
 json-output = ["dep:serde_json"]
 all-databases = ["postgres", "redis", "mysql", "mongodb"]
-full = ["http", "postgres", "redis", "mysql", "mongodb", "grpc", "influxdb", "rabbitmq", "kafka", "json-output"]
+full = [
+  "http",
+  "postgres",
+  "redis",
+  "mysql",
+  "mongodb",
+  "grpc",
+  "influxdb",
+  "rabbitmq",
+  "kafka",
+  "temporal",
+  "json-output",
+]
 
 [dependencies]
 tokio = { version = "1.41", default-features = false, features = [
