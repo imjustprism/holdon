@@ -46,6 +46,37 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `UNIMPLEMENTED`, `UNAVAILABLE`, TLS handshake, auth, deadline).
   Behind the new `temporal` cargo feature (depends on `grpc`).
 
+### Changed
+
+- `all-databases` feature now includes `mongodb`.
+- `full` feature bundles `mongodb`, `rabbitmq`, `kafka`, `temporal`,
+  `influxdb` alongside the existing probe set.
+- README restyled with logo header, value-prop section, security and
+  contributors sections, and a 15-scheme protocol table.
+- Shared `install_rustls_provider_once` helper consolidates the
+  per-module `OnceLock` provider installer across `mysql`, `mongodb`,
+  `rabbitmq`, and `kafka`.
+
+### Fixed
+
+- MongoDB probe no longer races the outer `tokio::time::timeout` with the
+  driver's 30-second `server_selection_timeout` default. Driver-internal
+  `connect_timeout` and `server_selection_timeout` are now set from
+  `ctx.attempt_timeout` and the outer wrapper is removed, so the driver
+  fails fast on its own terms instead of being yanked mid-work.
+- RabbitMQ `conn.close` now uses AMQP 0-9-1 spec reply code 200
+  (`REPLY_SUCCESS`) instead of 0.
+- Temporal probe drops a silent `unwrap_or_else` fallback in
+  `rewrite_url`; URL-rewrite failure now emits a real `err_stage` with
+  hint instead of dispatching the wrong scheme to the gRPC probe.
+- `tests/common/free_port` hardened against post-drop port-reuse races
+  on busy CI runners by re-verifying the bound-then-dropped port is
+  closed before returning.
+- Parse-error message scrub now percent-decodes query keys before
+  matching, so `?to%6Bken=...` cannot bypass the redaction.
+- Two stray non-doc `//` comments removed per the project's zero-
+  non-doc-comment rule.
+
 ## [0.1.2] - 2026-05-11
 
 ### Added
