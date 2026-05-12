@@ -80,8 +80,10 @@ pub fn fmt_dur(d: Duration) -> String {
 /// Accepted units: `us` / `µs`, `ms`, `s` (default if no unit), `m`, `h`.
 /// Compound forms like `1h30m` are not accepted. A bare number is interpreted
 /// as seconds for compatibility with `wait-for-it.sh`. Negative and NaN values
-/// are rejected. The literal strings `0`, `never`, `infinite`, and `none`
+/// are rejected. The literal strings `never`, `infinite`, and `none`
 /// (case-insensitive) map to [`Duration::MAX`] to denote "wait indefinitely".
+/// Bare `0` keeps its plain numeric meaning of zero duration so existing env
+/// vars like `HOLDON_INTERVAL=0` are not silently reinterpreted.
 ///
 /// # Errors
 /// Returns a human-readable error string when the input is not a finite
@@ -89,7 +91,7 @@ pub fn fmt_dur(d: Duration) -> String {
 pub fn parse_duration(s: &str) -> Result<Duration, String> {
     let s = s.trim();
     match s.to_ascii_lowercase().as_str() {
-        "0" | "never" | "infinite" | "none" => return Ok(Duration::MAX),
+        "never" | "infinite" | "none" => return Ok(Duration::MAX),
         _ => {}
     }
     let (num, unit) = s
@@ -150,12 +152,12 @@ mod tests {
 
     #[test]
     fn parses_unlimited_sentinels() {
-        assert_eq!(parse_duration("0").unwrap(), Duration::MAX);
         assert_eq!(parse_duration("never").unwrap(), Duration::MAX);
         assert_eq!(parse_duration("Never").unwrap(), Duration::MAX);
         assert_eq!(parse_duration("infinite").unwrap(), Duration::MAX);
         assert_eq!(parse_duration("none").unwrap(), Duration::MAX);
-        // "0s" (with unit) still means zero, not unlimited
+        // bare `0` keeps zero-duration semantics for env-var compatibility
+        assert_eq!(parse_duration("0").unwrap(), Duration::ZERO);
         assert_eq!(parse_duration("0s").unwrap(), Duration::ZERO);
     }
 
