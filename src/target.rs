@@ -916,7 +916,10 @@ fn scrub_query_secrets(input: &str) -> String {
         .map(|pair| {
             if let Some(eq) = pair.find('=') {
                 let key = &pair[..eq];
-                if key.eq_ignore_ascii_case("token") || key.eq_ignore_ascii_case("password") {
+                let decoded_key = percent_decode_lossy(key);
+                if decoded_key.eq_ignore_ascii_case("token")
+                    || decoded_key.eq_ignore_ascii_case("password")
+                {
                     return format!("{key}=***");
                 }
             }
@@ -924,6 +927,33 @@ fn scrub_query_secrets(input: &str) -> String {
         })
         .collect();
     format!("{head}{}", scrubbed.join("&"))
+}
+
+fn percent_decode_lossy(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(hi), Some(lo)) = (hex_digit(bytes[i + 1]), hex_digit(bytes[i + 2])) {
+                out.push(hi * 16 + lo);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+const fn hex_digit(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -1270,6 +1300,16 @@ mod tests {
             .to_string();
         assert!(!err.contains("verysecret"));
         assert!(err.contains("token=***"));
+    }
+
+    #[test]
+    fn parse_err_scrubs_percent_encoded_token_key() {
+        let err = "influxdb://h:8086?tok%65n=verysecret&expect-version=4"
+            .parse::<Target>()
+            .unwrap_err()
+            .to_string();
+        assert!(!err.contains("verysecret"));
+        assert!(err.contains("=***"));
     }
 
     #[test]
