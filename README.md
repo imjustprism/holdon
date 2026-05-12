@@ -64,6 +64,25 @@ cargo install holdon --features all-databases
 cargo install holdon --features full
 ```
 
+Skip the compile step with [`cargo binstall`](https://github.com/cargo-bins/cargo-binstall):
+
+```sh
+cargo binstall holdon
+```
+
+**Homebrew** (`macOS`, Linux):
+
+```sh
+brew install imjustprism/holdon/holdon
+```
+
+**Scoop** (Windows):
+
+```powershell
+scoop bucket add holdon https://github.com/imjustprism/scoop-holdon
+scoop install holdon
+```
+
 Prebuilt binaries for Linux (gnu/musl, `x86_64` + `aarch64`), `macOS` (`x86_64` + `arm64`), and Windows ship with every release:
 
 ```sh
