@@ -235,8 +235,6 @@ Bug reports, feature requests, and PRs are welcome.
 - Run `cargo fmt`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test --all-features` before opening a PR.
 - New probes follow the `src/checker/<name>.rs` shape: a `pub(super) async fn probe(...)` returning `Vec<Stage>` plus a feature gate in `Cargo.toml`.
 
-The full repo conventions live in `.rules` when present locally.
-
 ## Star History
 
 <a href="https://star-history.com/#imjustprism/holdon&Date">
