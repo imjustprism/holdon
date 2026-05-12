@@ -125,6 +125,7 @@ async fn run(args: Args) -> Result<ExitStatus> {
             body_json_match: args.expect_json.clone(),
             extra_ca_pem,
             min_tls: args.tls_min.into(),
+            body: args.data.as_ref().map(|s| s.as_bytes().to_vec()),
         });
     }
 

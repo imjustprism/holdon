@@ -232,6 +232,14 @@ pub(crate) struct Args {
     pub(crate) method: HttpMethod,
 
     #[cfg(feature = "http")]
+    #[arg(
+        long,
+        value_name = "BODY",
+        help = "Request body for http(s):// probes (sent as application/octet-stream unless overridden by -H)"
+    )]
+    pub(crate) data: Option<String>,
+
+    #[cfg(feature = "http")]
     #[arg(long, help = "Skip TLS certificate verification (dev only)")]
     pub(crate) insecure: bool,
 
