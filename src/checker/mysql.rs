@@ -1,5 +1,3 @@
-use std::sync::OnceLock;
-
 use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, Opts, OptsBuilder, SslOpts};
 use url::Url;
@@ -33,15 +31,8 @@ fn sslmode_disabled(url: &Url) -> bool {
     })
 }
 
-fn install_provider_once() {
-    static ONCE: OnceLock<()> = OnceLock::new();
-    ONCE.get_or_init(|| {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    });
-}
-
 async fn connect_and_query(conn_str: &str, want_tls: bool) -> mysql_async::Result<()> {
-    install_provider_once();
+    crate::checker::install_rustls_provider_once();
     let normalized: String;
     let for_opts: &str = if let Some(rest) = conn_str.strip_prefix("mariadb://") {
         normalized = format!("mysql://{rest}");

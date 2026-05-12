@@ -151,6 +151,20 @@ pub(crate) fn err_stage(
     }
 }
 
+#[cfg(any(
+    feature = "mysql",
+    feature = "mongodb",
+    feature = "rabbitmq",
+    feature = "kafka"
+))]
+pub(crate) fn install_rustls_provider_once() {
+    use std::sync::OnceLock;
+    static ONCE: OnceLock<()> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 pub(crate) const fn ok_stage(kind: StageKind, took: Duration) -> Stage {
     Stage {
         kind,

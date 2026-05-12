@@ -1,12 +1,11 @@
-use std::sync::OnceLock;
 use std::time::Instant;
 
 use rskafka::client::ClientBuilder;
 use tokio::time::timeout;
 use url::Url;
 
-use super::hint::hints;
-use super::{AttemptCtx, err_stage, ok_stage};
+use super::hint::{Hintable, hints};
+use super::{AttemptCtx, err_stage, install_rustls_provider_once, ok_stage};
 use crate::diagnostic::{Stage, StageKind};
 use crate::util::format_error_chain;
 
@@ -16,14 +15,13 @@ pub(super) async fn probe(
     min_partitions: Option<u32>,
     ctx: AttemptCtx,
 ) -> Vec<Stage> {
-    install_provider_once();
+    install_rustls_provider_once();
     let start = Instant::now();
     let stage = match timeout(ctx.attempt_timeout, run(url, topic, min_partitions)).await {
         Ok(Ok(())) => ok_stage(StageKind::Kafka, start.elapsed()),
         Ok(Err(e)) => {
             let msg = e.to_string();
-            let hint = e.hint();
-            err_stage(StageKind::Kafka, start.elapsed(), msg, Some(hint))
+            err_stage(StageKind::Kafka, start.elapsed(), msg, e.hint())
         }
         Err(_) => err_stage(
             StageKind::Kafka,
@@ -35,27 +33,12 @@ pub(super) async fn probe(
     vec![stage]
 }
 
+#[derive(Debug)]
 enum ProbeError {
     Connect(String),
     Metadata(String),
     TopicMissing(String),
     PartitionShortfall { have: usize, want: u32 },
-}
-
-impl ProbeError {
-    fn hint(&self) -> &'static str {
-        match self {
-            Self::Connect(msg) | Self::Metadata(msg)
-                if msg.to_ascii_lowercase().contains("tls")
-                    || msg.to_ascii_lowercase().contains("certificate") =>
-            {
-                hints::KAFKA_TLS
-            }
-            Self::Connect(_) | Self::Metadata(_) => hints::KAFKA_NOT_READY,
-            Self::TopicMissing(_) => hints::KAFKA_TOPIC_MISSING,
-            Self::PartitionShortfall { .. } => hints::KAFKA_PARTITION_COUNT,
-        }
-    }
 }
 
 impl std::fmt::Display for ProbeError {
@@ -68,6 +51,25 @@ impl std::fmt::Display for ProbeError {
                 write!(f, "topic has {have} partitions, need at least {want}")
             }
         }
+    }
+}
+
+impl std::error::Error for ProbeError {}
+
+impl Hintable for ProbeError {
+    fn hint(&self) -> Option<&'static str> {
+        Some(match self {
+            Self::Connect(msg) | Self::Metadata(msg) => {
+                let lower = msg.to_ascii_lowercase();
+                if lower.contains("tls") || lower.contains("certificate") {
+                    hints::KAFKA_TLS
+                } else {
+                    hints::KAFKA_NOT_READY
+                }
+            }
+            Self::TopicMissing(_) => hints::KAFKA_TOPIC_MISSING,
+            Self::PartitionShortfall { .. } => hints::KAFKA_PARTITION_COUNT,
+        })
     }
 }
 
@@ -118,13 +120,6 @@ fn rustls_client_config() -> rustls::ClientConfig {
         .with_no_client_auth()
 }
 
-fn install_provider_once() {
-    static ONCE: OnceLock<()> = OnceLock::new();
-    ONCE.get_or_init(|| {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    });
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -139,26 +134,26 @@ mod tests {
     #[test]
     fn probe_error_hint_routes_tls_messages() {
         let e = ProbeError::Connect("TLS handshake failed".into());
-        assert_eq!(e.hint(), hints::KAFKA_TLS);
+        assert_eq!(e.hint(), Some(hints::KAFKA_TLS));
         let e = ProbeError::Metadata("certificate verify error".into());
-        assert_eq!(e.hint(), hints::KAFKA_TLS);
+        assert_eq!(e.hint(), Some(hints::KAFKA_TLS));
     }
 
     #[test]
     fn probe_error_hint_routes_topic_to_topic_hint() {
         let e = ProbeError::TopicMissing("orders".into());
-        assert_eq!(e.hint(), hints::KAFKA_TOPIC_MISSING);
+        assert_eq!(e.hint(), Some(hints::KAFKA_TOPIC_MISSING));
     }
 
     #[test]
     fn probe_error_hint_routes_partition_to_partition_hint() {
         let e = ProbeError::PartitionShortfall { have: 1, want: 3 };
-        assert_eq!(e.hint(), hints::KAFKA_PARTITION_COUNT);
+        assert_eq!(e.hint(), Some(hints::KAFKA_PARTITION_COUNT));
     }
 
     #[test]
     fn probe_error_hint_falls_back_to_not_ready_for_plain_connect() {
         let e = ProbeError::Connect("connection refused".into());
-        assert_eq!(e.hint(), hints::KAFKA_NOT_READY);
+        assert_eq!(e.hint(), Some(hints::KAFKA_NOT_READY));
     }
 }
