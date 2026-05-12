@@ -6,6 +6,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-12
+
 ### Added
 
 - `influxdb://` and `influxdbs://` probe. Hits `/ping` for InfluxDB v1,
@@ -145,7 +147,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `--insecure` emits a stderr warning on every run
 - Stdin target ingest capped at 10 000 entries and 2 KiB per string
 
-[Unreleased]: https://github.com/imjustprism/holdon/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/imjustprism/holdon/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/imjustprism/holdon/releases/tag/v0.2.0
 [0.1.2]: https://github.com/imjustprism/holdon/releases/tag/v0.1.2
 [0.1.1]: https://github.com/imjustprism/holdon/releases/tag/v0.1.1
 [0.1.0]: https://github.com/imjustprism/holdon/releases/tag/v0.1.0
