@@ -66,6 +66,8 @@ pub enum StageKind {
     Influxdb,
     /// `MongoDB` connect plus admin `ping` command.
     Mongodb,
+    /// `RabbitMQ` AMQP connection (optionally passive-declare a queue or exchange).
+    Rabbitmq,
 }
 
 /// Outcome of a single [`Stage`].
@@ -132,6 +134,7 @@ impl StageKind {
             Self::Log => "log",
             Self::Influxdb => "influxdb",
             Self::Mongodb => "mongodb",
+            Self::Rabbitmq => "rabbitmq",
         }
     }
 }
@@ -151,6 +154,7 @@ impl fmt::Display for StageKind {
             Self::Log => "log file match",
             Self::Influxdb => "InfluxDB ping",
             Self::Mongodb => "MongoDB ping",
+            Self::Rabbitmq => "RabbitMQ AMQP",
         })
     }
 }
