@@ -45,35 +45,45 @@ pub(super) async fn probe(
 
 async fn run(uri: &str, queue: Option<&str>, exchange: Option<&str>) -> lapin::Result<()> {
     let conn = Connection::connect(uri, ConnectionProperties::default()).await?;
-    if queue.is_some() || exchange.is_some() {
-        let channel = conn.create_channel().await?;
-        if let Some(q) = queue {
-            channel
-                .queue_declare(
-                    q,
-                    QueueDeclareOptions {
-                        passive: true,
-                        ..QueueDeclareOptions::default()
-                    },
-                    FieldTable::default(),
-                )
-                .await?;
-        }
-        if let Some(x) = exchange {
-            channel
-                .exchange_declare(
-                    x,
-                    ExchangeKind::Direct,
-                    ExchangeDeclareOptions {
-                        passive: true,
-                        ..ExchangeDeclareOptions::default()
-                    },
-                    FieldTable::default(),
-                )
-                .await?;
-        }
-    }
+    let result = declare_checks(&conn, queue, exchange).await;
     let _ = conn.close(0, "ok").await;
+    result
+}
+
+async fn declare_checks(
+    conn: &Connection,
+    queue: Option<&str>,
+    exchange: Option<&str>,
+) -> lapin::Result<()> {
+    if queue.is_none() && exchange.is_none() {
+        return Ok(());
+    }
+    let channel = conn.create_channel().await?;
+    if let Some(q) = queue {
+        channel
+            .queue_declare(
+                q,
+                QueueDeclareOptions {
+                    passive: true,
+                    ..QueueDeclareOptions::default()
+                },
+                FieldTable::default(),
+            )
+            .await?;
+    }
+    if let Some(x) = exchange {
+        channel
+            .exchange_declare(
+                x,
+                ExchangeKind::Direct,
+                ExchangeDeclareOptions {
+                    passive: true,
+                    ..ExchangeDeclareOptions::default()
+                },
+                FieldTable::default(),
+            )
+            .await?;
+    }
     Ok(())
 }
 
