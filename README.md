@@ -223,20 +223,6 @@ See the [examples directory](https://github.com/imjustprism/holdon/tree/main/exa
 
 See [SECURITY.md](SECURITY.md) for the full threat model and disclosure instructions.
 
-## Compared to wait4x
-
-| | wait4x | holdon |
-| - | - | - |
-| Implementation | Go | Rust |
-| Binary size (musl, default) | ~10 MB | <4 MB |
-| TLS stack | go crypto/tls | rustls only |
-| Diagnostic stages | one-line error | multi-stage with hint |
-| MongoDB / RabbitMQ / Kafka / Temporal / InfluxDB v3 | partial | yes |
-| Kafka real Metadata API (not just SASL) | no | yes |
-| RabbitMQ passive queue/exchange declare | no | yes |
-| Token redaction across `Display`/`Debug`/errors | partial | yes |
-| Library crate | no | yes |
-
 ## Contributing
 
 Bug reports, feature requests, and PRs are welcome.
