@@ -377,10 +377,13 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
           version="${tag#v}"
-          sha_x64=$(curl -fsSL "https://github.com/imjustprism/holdon/releases/download/${tag}/SHA256SUMS" \
-            | awk '/holdon-x86_64-unknown-linux-musl\.tar\.gz$/{print $1}')
-          sha_a64=$(curl -fsSL "https://github.com/imjustprism/holdon/releases/download/${tag}/SHA256SUMS" \
-            | awk '/holdon-aarch64-unknown-linux-musl\.tar\.gz$/{print $1}')
+          sums=$(curl -fsSL "https://github.com/imjustprism/holdon/releases/download/${tag}/SHA256SUMS")
+          sha_x64=$(awk '/holdon-x86_64-unknown-linux-musl\.tar\.gz$/{print $1}' <<<"$sums")
+          sha_a64=$(awk '/holdon-aarch64-unknown-linux-musl\.tar\.gz$/{print $1}' <<<"$sums")
+          if [ -z "$sha_x64" ] || [ -z "$sha_a64" ]; then
+            echo "could not resolve musl sha256 from SHA256SUMS for ${tag}" >&2
+            exit 1
+          fi
           sed -i \
             -e "s/^pkgver=.*/pkgver=${version}/" \
             -e "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${sha_x64}')/" \
