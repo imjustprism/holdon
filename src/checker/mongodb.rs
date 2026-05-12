@@ -16,7 +16,7 @@ pub(super) async fn probe(url: &Url, ctx: AttemptCtx) -> Vec<Stage> {
     let start = Instant::now();
     let pw = url.password().unwrap_or("").to_owned();
     let conn_str = url.as_str().to_owned();
-    let stage = match timeout(ctx.attempt_timeout, ping(&conn_str)).await {
+    let stage = match timeout(ctx.attempt_timeout, ping(&conn_str, ctx)).await {
         Ok(Ok(())) => ok_stage(StageKind::Mongodb, start.elapsed()),
         Ok(Err(e)) => {
             let mut msg = format_error_chain(&e);
@@ -37,8 +37,10 @@ pub(super) async fn probe(url: &Url, ctx: AttemptCtx) -> Vec<Stage> {
     vec![stage]
 }
 
-async fn ping(uri: &str) -> mongodb::error::Result<()> {
-    let opts = ClientOptions::parse(uri).await?;
+async fn ping(uri: &str, ctx: AttemptCtx) -> mongodb::error::Result<()> {
+    let mut opts = ClientOptions::parse(uri).await?;
+    opts.connect_timeout = Some(ctx.attempt_timeout);
+    opts.server_selection_timeout = Some(ctx.attempt_timeout);
     let client = Client::with_options(opts)?;
     client
         .database("admin")
