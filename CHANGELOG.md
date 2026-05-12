@@ -6,6 +6,32 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-12
+
+### Added
+
+- `cargo binstall holdon` downloads the prebuilt GitHub Release binary
+  instead of compiling. `[package.metadata.binstall]` points at the
+  tag's tarball or `.zip` (Windows) with the correct bin path.
+- HTTP probes accept `--data BODY` to send a request body. Defaults to
+  `Content-Type: application/octet-stream` unless overridden via `-H`.
+- `--timeout`, `--interval`, and related duration flags accept the
+  literal strings `never`, `infinite`, and `none` (case-insensitive) as
+  "wait indefinitely" sentinels mapping to `Duration::MAX`. Bare `0`
+  still means zero duration for env-var compatibility
+  (`HOLDON_INTERVAL=0`).
+- Docker images now built for `linux/amd64` AND `linux/arm64`. Single
+  multi-arch manifest published to `ghcr.io/imjustprism/holdon`.
+- Distribution channels live: Homebrew tap
+  (`brew install imjustprism/holdon/holdon`), Scoop bucket
+  (`scoop bucket add holdon https://github.com/imjustprism/scoop-holdon`),
+  Winget auto-submission on each tag.
+
+### Changed
+
+- README install section advertises `cargo binstall`, Homebrew, and
+  Scoop alongside the existing prebuilt-binaries path.
+
 ## [0.2.0] - 2026-05-12
 
 ### Added
