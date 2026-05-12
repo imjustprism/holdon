@@ -107,10 +107,7 @@ mongodb = { version = "3.6", default-features = false, features = [
   "bson-2",
   "compat-3-3-0",
 ], optional = true }
-lapin = { version = "3.4", default-features = false, features = [
-  "rustls",
-  "default-runtime",
-], optional = true }
+lapin = { version = "3.4", default-features = false, features = ["rustls", "default-runtime"], optional = true }
 tonic = { version = "0.13", default-features = false, features = [
   "channel",
   "prost",
