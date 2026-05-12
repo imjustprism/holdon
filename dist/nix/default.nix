@@ -4,7 +4,6 @@
   fetchFromGitHub,
   installShellFiles,
   pkg-config,
-  stdenv,
 }:
 rustPlatform.buildRustPackage rec {
   pname = "holdon";
@@ -14,10 +13,12 @@ rustPlatform.buildRustPackage rec {
     owner = "imjustprism";
     repo = "holdon";
     rev = "v${version}";
-    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    # Fill at nixpkgs submission time: `nix-prefetch-github imjustprism holdon --rev v0.2.0`
+    hash = lib.fakeHash;
   };
 
-  cargoHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  # Fill at nixpkgs submission time: first build reports the correct hash in the error.
+  cargoHash = lib.fakeHash;
 
   nativeBuildInputs = [installShellFiles pkg-config];
 
