@@ -50,7 +50,7 @@ async fn run(uri: &str, queue: Option<&str>, exchange: Option<&str>) -> lapin::R
         if let Some(q) = queue {
             channel
                 .queue_declare(
-                    q.into(),
+                    q,
                     QueueDeclareOptions {
                         passive: true,
                         ..QueueDeclareOptions::default()
@@ -62,7 +62,7 @@ async fn run(uri: &str, queue: Option<&str>, exchange: Option<&str>) -> lapin::R
         if let Some(x) = exchange {
             channel
                 .exchange_declare(
-                    x.into(),
+                    x,
                     ExchangeKind::Direct,
                     ExchangeDeclareOptions {
                         passive: true,
@@ -73,7 +73,7 @@ async fn run(uri: &str, queue: Option<&str>, exchange: Option<&str>) -> lapin::R
                 .await?;
         }
     }
-    let _ = conn.close(0, "ok".into()).await;
+    let _ = conn.close(0, "ok").await;
     Ok(())
 }
 
