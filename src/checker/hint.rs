@@ -66,7 +66,9 @@ pub(crate) mod hints {
     pub(crate) const INFLUXDB_VERSION: &str =
         "server major version did not match expect-version, check the target server";
     pub(crate) const INFLUXDB_PARSE: &str =
-        "fix the influxdb:// URL, only ?expect-version=1|2 is supported";
+        "fix the influxdb:// URL, only ?expect-version=1|2|3 and ?token=... are supported";
+    pub(crate) const INFLUXDB_AUTH: &str =
+        "/ping returned 401, send ?token=... for v3 OSS or start the server with --without-auth";
     pub(crate) const MONGODB_NOT_READY: &str =
         "mongodb server slow, not yet accepting connections, or unreachable";
     pub(crate) const MONGODB_AUTH: &str =
