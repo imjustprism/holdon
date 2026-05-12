@@ -32,6 +32,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   least N partitions. Hints distinguish topic-missing, partition
   shortfall, TLS handshake, and generic not-ready failures. Behind the
   new `kafka` cargo feature.
+- `temporal://` and `temporals://` probe. Issues a gRPC
+  `grpc.health.v1.Health/Check` against
+  `temporal.api.workflowservice.v1.WorkflowService`. TLS via rustls for
+  `temporals://`. Reuses every gRPC operator hint (`NOT_SERVING`,
+  `UNIMPLEMENTED`, `UNAVAILABLE`, TLS handshake, auth, deadline).
+  Behind the new `temporal` cargo feature (depends on `grpc`).
 
 ## [0.1.2] - 2026-05-11
 

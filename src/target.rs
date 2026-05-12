@@ -210,6 +210,16 @@ pub enum Target {
         /// Minimum partition count required for the named topic.
         min_partitions: Option<u32>,
     },
+    /// `Temporal` server gRPC `Health/Check` probe.
+    ///
+    /// Parsed from `temporal://host:7233` (plaintext) or
+    /// `temporals://host:7233` (TLS via rustls). Targets the
+    /// `temporal.api.workflowservice.v1.WorkflowService` health endpoint
+    /// per the gRPC health spec. Behind the `temporal` feature.
+    Temporal {
+        /// Full Temporal endpoint URL.
+        url: Url,
+    },
 }
 
 /// Matcher applied to log file content by [`Target::Log`].
@@ -358,6 +368,10 @@ impl fmt::Debug for Target {
                 .field("topic", topic)
                 .field("min_partitions", min_partitions)
                 .finish(),
+            Self::Temporal { url } => f
+                .debug_struct("Temporal")
+                .field("url", &redact(url))
+                .finish(),
         }
     }
 }
@@ -379,7 +393,8 @@ impl fmt::Display for Target {
             | Self::Influxdb { url }
             | Self::Mongodb { url }
             | Self::Rabbitmq { url, .. }
-            | Self::Kafka { url, .. } => write!(f, "{}", redact(url)),
+            | Self::Kafka { url, .. }
+            | Self::Temporal { url } => write!(f, "{}", redact(url)),
             Self::Exec { program, args } => {
                 write!(f, "exec://{}", program.display())?;
                 let mut first = true;
@@ -521,6 +536,20 @@ impl FromStr for Target {
                     .ok_or_else(|| parse_err(input, "missing host"))?;
                 Hostname::new(host)?;
                 Ok(Self::Mongodb { url })
+            }
+            "temporal" | "temporals" => {
+                let host = url
+                    .host_str()
+                    .ok_or_else(|| parse_err(input, "missing host"))?;
+                Hostname::new(host)?;
+                url.port().ok_or_else(|| Error::MissingPort(input.into()))?;
+                if url.query().is_some() {
+                    return Err(parse_err(
+                        input,
+                        "temporal:// does not accept query parameters",
+                    ));
+                }
+                Ok(Self::Temporal { url })
             }
             "kafka" | "kafkas" => {
                 let host = url
@@ -1308,5 +1337,27 @@ mod tests {
     #[test]
     fn kafka_missing_port_rejected() {
         assert!("kafka://broker".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn temporal_plain_parses() {
+        let t: Target = "temporal://localhost:7233".parse().unwrap();
+        assert!(matches!(t, Target::Temporal { .. }));
+    }
+
+    #[test]
+    fn temporal_tls_parses() {
+        let t: Target = "temporals://cloud.temporal.io:7233".parse().unwrap();
+        assert!(matches!(t, Target::Temporal { .. }));
+    }
+
+    #[test]
+    fn temporal_missing_port_rejected() {
+        assert!("temporal://localhost".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn temporal_rejects_query_params() {
+        assert!("temporal://h:7233/?mode=worker".parse::<Target>().is_err());
     }
 }
