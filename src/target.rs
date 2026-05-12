@@ -196,6 +196,20 @@ pub enum Target {
         /// Exchange to passively declare, if any.
         exchange: Option<String>,
     },
+    /// `Kafka` broker metadata probe.
+    ///
+    /// Parsed from `kafka://host:9092` (plaintext) or `kafkas://host:9092`
+    /// (TLS via rustls). Fetches Metadata API and optionally verifies a
+    /// topic exists via `?topic=NAME` and has at least N partitions via
+    /// `?expect-partitions=N`. Behind the `kafka` feature.
+    Kafka {
+        /// Full Kafka URL.
+        url: Url,
+        /// Topic to verify exists in broker metadata, if any.
+        topic: Option<String>,
+        /// Minimum partition count required for the named topic.
+        min_partitions: Option<u32>,
+    },
 }
 
 /// Matcher applied to log file content by [`Target::Log`].
@@ -334,6 +348,16 @@ impl fmt::Debug for Target {
                 .field("queue", queue)
                 .field("exchange", exchange)
                 .finish(),
+            Self::Kafka {
+                url,
+                topic,
+                min_partitions,
+            } => f
+                .debug_struct("Kafka")
+                .field("url", &redact(url))
+                .field("topic", topic)
+                .field("min_partitions", min_partitions)
+                .finish(),
         }
     }
 }
@@ -354,7 +378,8 @@ impl fmt::Display for Target {
             | Self::Grpc { url, .. }
             | Self::Influxdb { url }
             | Self::Mongodb { url }
-            | Self::Rabbitmq { url, .. } => write!(f, "{}", redact(url)),
+            | Self::Rabbitmq { url, .. }
+            | Self::Kafka { url, .. } => write!(f, "{}", redact(url)),
             Self::Exec { program, args } => {
                 write!(f, "exec://{}", program.display())?;
                 let mut first = true;
@@ -496,6 +521,59 @@ impl FromStr for Target {
                     .ok_or_else(|| parse_err(input, "missing host"))?;
                 Hostname::new(host)?;
                 Ok(Self::Mongodb { url })
+            }
+            "kafka" | "kafkas" => {
+                let host = url
+                    .host_str()
+                    .ok_or_else(|| parse_err(input, "missing host"))?;
+                Hostname::new(host)?;
+                url.port().ok_or_else(|| Error::MissingPort(input.into()))?;
+                let mut topic: Option<String> = None;
+                let mut min_partitions: Option<u32> = None;
+                for (k, v) in url.query_pairs() {
+                    match k.as_ref() {
+                        "topic" => {
+                            if v.is_empty() {
+                                return Err(parse_err(input, "kafka:// topic cannot be empty"));
+                            }
+                            topic = Some(v.into_owned());
+                        }
+                        "expect-partitions" => {
+                            let n: u32 = v.parse().map_err(|_| {
+                                parse_err(
+                                    input,
+                                    "kafka:// expect-partitions must be a positive integer",
+                                )
+                            })?;
+                            if n == 0 {
+                                return Err(parse_err(
+                                    input,
+                                    "kafka:// expect-partitions must be at least 1",
+                                ));
+                            }
+                            min_partitions = Some(n);
+                        }
+                        other => {
+                            return Err(parse_err(
+                                input,
+                                &format!(
+                                    "unknown kafka:// query key `{other}` (only `topic` or `expect-partitions` supported)"
+                                ),
+                            ));
+                        }
+                    }
+                }
+                if min_partitions.is_some() && topic.is_none() {
+                    return Err(parse_err(
+                        input,
+                        "kafka:// ?expect-partitions requires ?topic",
+                    ));
+                }
+                Ok(Self::Kafka {
+                    url,
+                    topic,
+                    min_partitions,
+                })
             }
             "amqp" | "amqps" => {
                 let host = url
@@ -1162,5 +1240,73 @@ mod tests {
         let s = format!("{t}");
         assert!(!s.contains("secret"));
         assert!(s.contains("***"));
+    }
+
+    #[test]
+    fn kafka_plain_parses() {
+        let t: Target = "kafka://broker:9092".parse().unwrap();
+        match t {
+            Target::Kafka {
+                topic,
+                min_partitions,
+                ..
+            } => {
+                assert!(topic.is_none());
+                assert!(min_partitions.is_none());
+            }
+            _ => panic!("expected Kafka"),
+        }
+    }
+
+    #[test]
+    fn kafka_tls_parses() {
+        let t: Target = "kafkas://broker:9093".parse().unwrap();
+        assert!(matches!(t, Target::Kafka { .. }));
+    }
+
+    #[test]
+    fn kafka_topic_and_partitions_parses() {
+        let t: Target = "kafka://h:9092/?topic=orders&expect-partitions=12"
+            .parse()
+            .unwrap();
+        match t {
+            Target::Kafka {
+                topic,
+                min_partitions,
+                ..
+            } => {
+                assert_eq!(topic.as_deref(), Some("orders"));
+                assert_eq!(min_partitions, Some(12));
+            }
+            _ => panic!("expected Kafka"),
+        }
+    }
+
+    #[test]
+    fn kafka_rejects_partitions_without_topic() {
+        assert!(
+            "kafka://h:9092/?expect-partitions=3"
+                .parse::<Target>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn kafka_rejects_zero_partitions() {
+        assert!(
+            "kafka://h:9092/?topic=t&expect-partitions=0"
+                .parse::<Target>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn kafka_rejects_unknown_query_key() {
+        assert!("kafka://h:9092/?group=x".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn kafka_missing_port_rejected() {
+        assert!("kafka://broker".parse::<Target>().is_err());
     }
 }

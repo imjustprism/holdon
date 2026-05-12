@@ -17,6 +17,8 @@ mod hint;
 pub mod http;
 #[cfg(feature = "influxdb")]
 mod influxdb;
+#[cfg(feature = "kafka")]
+mod kafka;
 mod log;
 #[cfg(feature = "mongodb")]
 mod mongodb;
@@ -101,6 +103,14 @@ impl Target {
             } => rabbitmq::probe(url, queue.as_deref(), exchange.as_deref(), ctx).await,
             #[cfg(not(feature = "rabbitmq"))]
             Self::Rabbitmq { .. } => disabled_stage(StageKind::Rabbitmq, "rabbitmq"),
+            #[cfg(feature = "kafka")]
+            Self::Kafka {
+                url,
+                topic,
+                min_partitions,
+            } => kafka::probe(url, topic.as_deref(), *min_partitions, ctx).await,
+            #[cfg(not(feature = "kafka"))]
+            Self::Kafka { .. } => disabled_stage(StageKind::Kafka, "kafka"),
         };
         let ok = stages
             .last()

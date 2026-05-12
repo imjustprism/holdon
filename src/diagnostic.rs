@@ -68,6 +68,8 @@ pub enum StageKind {
     Mongodb,
     /// `RabbitMQ` AMQP connection (optionally passive-declare a queue or exchange).
     Rabbitmq,
+    /// `Kafka` broker metadata fetch (optionally checks topic + partition count).
+    Kafka,
 }
 
 /// Outcome of a single [`Stage`].
@@ -135,6 +137,7 @@ impl StageKind {
             Self::Influxdb => "influxdb",
             Self::Mongodb => "mongodb",
             Self::Rabbitmq => "rabbitmq",
+            Self::Kafka => "kafka",
         }
     }
 }
@@ -155,6 +158,7 @@ impl fmt::Display for StageKind {
             Self::Influxdb => "InfluxDB ping",
             Self::Mongodb => "MongoDB ping",
             Self::Rabbitmq => "RabbitMQ AMQP",
+            Self::Kafka => "Kafka metadata",
         })
     }
 }

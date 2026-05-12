@@ -25,6 +25,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   classify access-refused, vhost-denied, queue-not-found, and TLS
   handshake errors. Password redacted in `Display`, `Debug`, and every
   error path. Behind the new `rabbitmq` cargo feature.
+- `kafka://` and `kafkas://` probe via pure-Rust `rskafka` with rustls.
+  Fetches the Metadata API to verify the broker is reachable and
+  serving requests. Optional `?topic=NAME` requires the topic to exist;
+  optional `?expect-partitions=N` requires the named topic to have at
+  least N partitions. Hints distinguish topic-missing, partition
+  shortfall, TLS handshake, and generic not-ready failures. Behind the
+  new `kafka` cargo feature.
 
 ## [0.1.2] - 2026-05-11
 
