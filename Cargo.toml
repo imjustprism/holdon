@@ -25,6 +25,14 @@ include = [
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.{ archive-format }"
+pkg-fmt = "tgz"
+bin-dir = "{ name }-{ target }/{ bin }{ binary-ext }"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+
 [[bin]]
 name = "holdon"
 path = "src/main.rs"
