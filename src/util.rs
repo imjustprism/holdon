@@ -156,7 +156,11 @@ mod tests {
         assert_eq!(parse_duration("Never").unwrap(), Duration::MAX);
         assert_eq!(parse_duration("infinite").unwrap(), Duration::MAX);
         assert_eq!(parse_duration("none").unwrap(), Duration::MAX);
-        // bare `0` keeps zero-duration semantics for env-var compatibility
+    }
+
+    #[test]
+    fn parses_zero_as_zero_not_unlimited() {
+        // env-var compatibility: HOLDON_INTERVAL=0 must keep meaning "no delay"
         assert_eq!(parse_duration("0").unwrap(), Duration::ZERO);
         assert_eq!(parse_duration("0s").unwrap(), Duration::ZERO);
     }
