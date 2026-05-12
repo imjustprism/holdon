@@ -8,21 +8,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- `influxdb://` probe now supports InfluxDB v3 (current major).
-  `?expect-version=3` accepted alongside `1` and `2`; v3 sends the
-  `X-Influxdb-Build` header which is checked when `X-Influxdb-Version`
-  is absent. Optional `?token=...` sends `Authorization: Token ...`
-  so the probe works against v3 OSS servers that require auth on
-  `/ping` by default. 401 responses route to a dedicated hint.
-- Token query parameter is redacted in `Display` (`?token=***`) and in
-  every error path; tested across plain and JSON output. No token leak.
-
-### Added
-
-- `influxdb://` and `influxdbs://` probe. Hits `/ping` (works for both
-  InfluxDB v1 and v2). Optional `?expect-version=1|2` checks the
-  `X-Influxdb-Version` response header major. Behind the new `influxdb`
-  cargo feature (depends on `http`). Bundled in `full`.
+- `influxdb://` and `influxdbs://` probe. Hits `/ping` for InfluxDB v1,
+  v2, and v3. Optional `?expect-version=1|2|3` checks the
+  `X-Influxdb-Version` (v1/v2) or `X-Influxdb-Build` (v3) response
+  header. Optional `?token=...` sends `Authorization: Token ...` so the
+  probe works against v3 OSS servers that require auth on `/ping` by
+  default. 401 responses route to a dedicated auth hint. Token query
+  value redacted in `Display`, in CLI parse errors, and in every error
+  path. Behind the new `influxdb` cargo feature (depends on `http`).
+  Bundled in `full`.
 - `mongodb://` and `mongodb+srv://` probe. Parses the connection string
   via the official `mongodb` driver, runs admin `{ ping: 1 }`. SRV
   discovery via DNS, TLS through `?tls=true`. Operator hints for auth

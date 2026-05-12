@@ -901,9 +901,29 @@ fn parse_port(s: &str, input: &str) -> Result<u16> {
 
 fn parse_err(input: &str, reason: &str) -> Error {
     Error::Parse {
-        input: input.into(),
+        input: scrub_query_secrets(input),
         reason: reason.into(),
     }
+}
+
+fn scrub_query_secrets(input: &str) -> String {
+    let Some(q_start) = input.find('?') else {
+        return input.to_owned();
+    };
+    let (head, query) = input.split_at(q_start + 1);
+    let scrubbed: Vec<String> = query
+        .split('&')
+        .map(|pair| {
+            if let Some(eq) = pair.find('=') {
+                let key = &pair[..eq];
+                if key.eq_ignore_ascii_case("token") || key.eq_ignore_ascii_case("password") {
+                    return format!("{key}=***");
+                }
+            }
+            pair.to_owned()
+        })
+        .collect();
+    format!("{head}{}", scrubbed.join("&"))
 }
 
 #[cfg(test)]
@@ -1240,6 +1260,16 @@ mod tests {
         let s = format!("{t}");
         assert!(!s.contains("secret"));
         assert!(s.contains("expect-version=3"));
+    }
+
+    #[test]
+    fn influxdb_parse_error_scrubs_token() {
+        let err = "influxdb://h:8086?token=verysecret&expect-version=4"
+            .parse::<Target>()
+            .unwrap_err()
+            .to_string();
+        assert!(!err.contains("verysecret"));
+        assert!(err.contains("token=***"));
     }
 
     #[test]

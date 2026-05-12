@@ -181,13 +181,11 @@ fn version_matches(reported: &str, want_major: u8) -> bool {
 }
 
 fn build_matches(reported: &str, want_major: u8) -> bool {
-    let lower = reported.to_ascii_lowercase();
-    match want_major {
-        3 => lower.contains("core") || lower.contains("enterprise") || lower.starts_with("v3"),
-        2 => lower.contains("oss") && !lower.contains("v1") && !lower.contains("core"),
-        1 => lower.contains("v1"),
-        _ => false,
+    if want_major != 3 {
+        return false;
     }
+    let lower = reported.to_ascii_lowercase();
+    lower.contains("core") || lower.contains("enterprise") || lower.starts_with("v3")
 }
 
 #[cfg(test)]
@@ -217,6 +215,7 @@ mod tests {
         assert!(build_matches("core", 3));
         assert!(build_matches("Enterprise", 3));
         assert!(!build_matches("Core", 2));
+        assert!(!build_matches("Core", 1));
     }
 
     #[test]
