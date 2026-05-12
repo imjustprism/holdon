@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/png/16-white-black.png" alt="holdon logo" width="160">
+</p>
+
 <h1 align="center">holdon</h1>
 
 <p align="center">
