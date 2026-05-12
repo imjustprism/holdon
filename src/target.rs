@@ -165,8 +165,10 @@ pub enum Target {
     ///
     /// Parsed from `influxdb://host:8086` (plaintext) or
     /// `influxdbs://host:8086` (TLS via rustls). Optional
-    /// `?expect-version=1|2` requires the `X-Influxdb-Version` response
-    /// header's major to match. Behind the `influxdb` feature.
+    /// `?expect-version=1|2|3` requires the `X-Influxdb-Version` (v1, v2)
+    /// or `X-Influxdb-Build` (v3) response header to identify the major.
+    /// Optional `?token=...` sends `Authorization: Token ...` for v3 OSS
+    /// servers that require auth on `/ping`. Behind the `influxdb` feature.
     Influxdb {
         /// Full `InfluxDB` URL.
         url: Url,
@@ -438,11 +440,33 @@ fn is_unc_or_remote(path: &std::path::Path) -> bool {
 }
 
 fn redact(url: &Url) -> String {
-    if url.password().is_none() {
+    let has_pw = url.password().is_some();
+    let has_token = url
+        .query_pairs()
+        .any(|(k, _)| k.eq_ignore_ascii_case("token"));
+    if !has_pw && !has_token {
         return url.to_string();
     }
     let mut clone = url.clone();
-    let _ = clone.set_password(Some("***"));
+    if has_pw {
+        let _ = clone.set_password(Some("***"));
+    }
+    if has_token {
+        let pairs: Vec<(String, String)> = url
+            .query_pairs()
+            .map(|(k, v)| {
+                if k.eq_ignore_ascii_case("token") {
+                    (k.into_owned(), "***".to_owned())
+                } else {
+                    (k.into_owned(), v.into_owned())
+                }
+            })
+            .collect();
+        clone
+            .query_pairs_mut()
+            .clear()
+            .extend_pairs(pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+    }
     clone.to_string()
 }
 
@@ -650,19 +674,23 @@ impl FromStr for Target {
                     .ok_or_else(|| Error::MissingPort(input.into()))?;
                 for (k, v) in url.query_pairs() {
                     if k.eq_ignore_ascii_case("expect-version") {
-                        if v.as_ref() != "1" && v.as_ref() != "2" {
+                        if v.as_ref() != "1" && v.as_ref() != "2" && v.as_ref() != "3" {
                             return Err(parse_err(
                                 input,
                                 &format!(
-                                    "influxdb:// expect-version `{v}` invalid (only `1` or `2`)"
+                                    "influxdb:// expect-version `{v}` invalid (only `1`, `2`, or `3`)"
                                 ),
                             ));
+                        }
+                    } else if k.eq_ignore_ascii_case("token") {
+                        if v.is_empty() {
+                            return Err(parse_err(input, "influxdb:// token cannot be empty"));
                         }
                     } else {
                         return Err(parse_err(
                             input,
                             &format!(
-                                "unknown influxdb:// query key `{k}` (only `expect-version` supported)"
+                                "unknown influxdb:// query key `{k}` (only `expect-version` and `token` supported)"
                             ),
                         ));
                     }
@@ -1173,10 +1201,45 @@ mod tests {
     #[test]
     fn influxdb_rejects_bad_version_at_parse() {
         assert!(
-            "influxdb://h:8086?expect-version=3"
+            "influxdb://h:8086?expect-version=4"
                 .parse::<Target>()
                 .is_err()
         );
+    }
+
+    #[test]
+    fn influxdb_accepts_version_3_at_parse() {
+        let t: Target = "influxdb://h:8086?expect-version=3".parse().unwrap();
+        assert!(matches!(t, Target::Influxdb { .. }));
+    }
+
+    #[test]
+    fn influxdb_accepts_token_at_parse() {
+        let t: Target = "influxdb://h:8086?token=secret".parse().unwrap();
+        assert!(matches!(t, Target::Influxdb { .. }));
+    }
+
+    #[test]
+    fn influxdb_rejects_empty_token() {
+        assert!("influxdb://h:8086?token=".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn influxdb_display_redacts_token() {
+        let t: Target = "influxdb://h:8086?token=apiv3_supersecret".parse().unwrap();
+        let s = format!("{t}");
+        assert!(!s.contains("apiv3_supersecret"));
+        assert!(s.contains("token=***"));
+    }
+
+    #[test]
+    fn influxdb_display_keeps_other_query_params() {
+        let t: Target = "influxdb://h:8086?token=secret&expect-version=3"
+            .parse()
+            .unwrap();
+        let s = format!("{t}");
+        assert!(!s.contains("secret"));
+        assert!(s.contains("expect-version=3"));
     }
 
     #[test]

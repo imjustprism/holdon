@@ -87,7 +87,7 @@ holdon exec:///usr/local/bin/check.sh     # custom readiness command
 | `mysql://`, `mariadb://`        | Connect + `SELECT 1` (TLS by default)     |
 | `redis://`, `rediss://`         | Connect + `PING` (`rediss://` for TLS)    |
 | `grpc://`, `grpcs://`           | `grpc.health.v1.Health/Check` unary (optional `/Service` path) |
-| `influxdb://`, `influxdbs://`   | `/ping` (works for v1 and v2), optional `?expect-version=1\|2` |
+| `influxdb://`, `influxdbs://`   | `/ping` for v1, v2, and v3. Optional `?expect-version=1\|2\|3` and `?token=...` (Bearer/Token auth for v3 OSS) |
 | `mongodb://`, `mongodb+srv://`  | Connect + admin `ping` command (SRV-aware)  |
 | `amqp://`, `amqps://`           | `RabbitMQ` AMQP connect, optional `?queue=` / `?exchange=` passive declare |
 | `kafka://`, `kafkas://`         | Kafka broker Metadata fetch, optional `?topic=` and `?expect-partitions=` |

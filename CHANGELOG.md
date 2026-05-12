@@ -8,6 +8,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `influxdb://` probe now supports InfluxDB v3 (current major).
+  `?expect-version=3` accepted alongside `1` and `2`; v3 sends the
+  `X-Influxdb-Build` header which is checked when `X-Influxdb-Version`
+  is absent. Optional `?token=...` sends `Authorization: Token ...`
+  so the probe works against v3 OSS servers that require auth on
+  `/ping` by default. 401 responses route to a dedicated hint.
+- Token query parameter is redacted in `Display` (`?token=***`) and in
+  every error path; tested across plain and JSON output. No token leak.
+
+### Added
+
 - `influxdb://` and `influxdbs://` probe. Hits `/ping` (works for both
   InfluxDB v1 and v2). Optional `?expect-version=1|2` checks the
   `X-Influxdb-Version` response header major. Behind the new `influxdb`
