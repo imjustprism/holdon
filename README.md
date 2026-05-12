@@ -38,13 +38,13 @@ hint: service may still be initializing
 
 **Parallel by default.** Pass a dozen targets in one command. They run concurrently. Sequential mode is opt-in via `--sequential`.
 
-**Protocol-aware probes for 15 schemes.** TCP, HTTP, DNS, file, exec, log, Postgres, MySQL/MariaDB, Redis, MongoDB, RabbitMQ (AMQP), Kafka, Temporal, InfluxDB (v1/v2/v3), and gRPC `Health/Check`. Each probe speaks the real protocol instead of just opening a socket.
+**Protocol-aware probes for 15 schemes.** TCP, HTTP, DNS, file, exec, log, Postgres, `MySQL`/`MariaDB`, Redis, `MongoDB`, `RabbitMQ` (AMQP), Kafka, Temporal, `InfluxDB` (v1/v2/v3), and gRPC `Health/Check`. Each probe speaks the real protocol instead of just opening a socket.
 
 **Type-safe URL DSL.** `mongodb://`, `kafka://`, `temporal://`, etc. Query parameters validated at parse time. URL passwords and `?token=` values redacted in every error path, in `Display`, in `Debug`, and in CLI parse errors.
 
 **One static binary.** musl build is under 4 MB with default features, under 1.5 MB with no defaults. No runtime, no shell-out, no OpenSSL anywhere in the dependency tree.
 
-**Rustls everywhere.** Postgres, MySQL, Redis, MongoDB, RabbitMQ, Kafka, Temporal, HTTP, and gRPC all share one TLS stack with bundled webpki roots. No `native-tls`.
+**Rustls everywhere.** Postgres, `MySQL`, Redis, `MongoDB`, `RabbitMQ`, Kafka, Temporal, HTTP, and gRPC all share one TLS stack with bundled webpki roots. No `native-tls`.
 
 **Machine output.** `--output json` emits a stable line-delimited schema (`v: 1`) ready for `jq`. POSIX-aligned exit codes (`0`, `2`, `124`, `126`, `127`, `130`, `143`).
 
@@ -64,7 +64,7 @@ cargo install holdon --features all-databases
 cargo install holdon --features full
 ```
 
-Prebuilt binaries for Linux (gnu/musl, x86_64 + aarch64), macOS (x86_64 + arm64), and Windows ship with every release:
+Prebuilt binaries for Linux (gnu/musl, `x86_64` + `aarch64`), `macOS` (`x86_64` + `arm64`), and Windows ship with every release:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/imjustprism/holdon/main/install.sh | sh
@@ -216,7 +216,7 @@ See the [examples directory](https://github.com/imjustprism/holdon/tree/main/exa
 ## Security
 
 - **TLS is rustls only.** No OpenSSL anywhere in the tree. `cargo-deny` blocks it.
-- **Rustls everywhere.** Every TLS-capable probe (HTTP, Postgres, MySQL, Redis, MongoDB, RabbitMQ, Kafka, Temporal, gRPC) uses the same ring-backed rustls stack with bundled webpki roots.
+- **Rustls everywhere.** Every TLS-capable probe (HTTP, Postgres, `MySQL`, Redis, `MongoDB`, `RabbitMQ`, Kafka, Temporal, gRPC) uses the same ring-backed rustls stack with bundled webpki roots.
 - **Password redaction.** URL passwords are stripped in `Display`, `Debug`, and every error path. Same for `?token=` query values on schemes that accept them.
 - **Parse errors scrub secrets.** CLI errors like "invalid target ..." percent-decode query keys before matching, so `?to%6Bken=...` cannot bypass the redaction.
 - **HTTP redirect policy.** Followed up to 5 hops. `https → http` downgrades refused.
