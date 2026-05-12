@@ -9,8 +9,8 @@ use crate::diagnostic::{Stage, StageKind};
 const TEMPORAL_SERVICE: &str = "temporal.api.workflowservice.v1.WorkflowService";
 
 pub(super) async fn probe(url: &Url, ctx: AttemptCtx) -> Vec<Stage> {
+    let start = Instant::now();
     let Some(grpc_url) = rewrite_url(url) else {
-        let start = Instant::now();
         return vec![err_stage(
             StageKind::Temporal,
             start.elapsed(),
