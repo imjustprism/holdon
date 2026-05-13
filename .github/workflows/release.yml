@@ -201,7 +201,7 @@ jobs:
           files: dist/*
           generate_release_notes: true
           draft: false
-          make_latest: "true"
+          make_latest: "legacy"
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
 
   publish:
