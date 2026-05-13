@@ -6,6 +6,36 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-12
+
+### Added
+
+- `cargo binstall holdon` downloads the prebuilt GitHub Release binary
+  instead of compiling. `[package.metadata.binstall]` points at the
+  tag's tarball or `.zip` (Windows) with the correct bin path.
+- HTTP probes accept `--data BODY` to send a request body. Defaults to
+  `Content-Type: application/octet-stream` unless overridden via `-H`.
+- `--timeout`, `--interval`, and related duration flags accept the
+  literal strings `never`, `infinite`, and `none` (case-insensitive) as
+  "wait indefinitely" sentinels mapping to `Duration::MAX`.
+- Docker images now built for `linux/amd64` AND `linux/arm64`. Single
+  multi-arch manifest published to `ghcr.io/imjustprism/holdon`.
+- Distribution channels live: Homebrew tap
+  (`brew install imjustprism/holdon/holdon`), Scoop bucket
+  (`scoop bucket add holdon https://github.com/imjustprism/scoop-holdon`),
+  Winget auto-submission on each tag.
+
+### Changed
+
+- README install section advertises `cargo binstall`, Homebrew, and
+  Scoop alongside the existing prebuilt-binaries path.
+
+### Fixed
+
+- Bare `0` keeps zero-duration semantics so env vars like
+  `HOLDON_INTERVAL=0` continue to mean "no delay" instead of being
+  silently reinterpreted as the unlimited sentinel.
+
 ## [0.2.0] - 2026-05-12
 
 ### Added
@@ -178,7 +208,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `--insecure` emits a stderr warning on every run
 - Stdin target ingest capped at 10 000 entries and 2 KiB per string
 
-[Unreleased]: https://github.com/imjustprism/holdon/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/imjustprism/holdon/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/imjustprism/holdon/releases/tag/v0.2.1
 [0.2.0]: https://github.com/imjustprism/holdon/releases/tag/v0.2.0
 [0.1.2]: https://github.com/imjustprism/holdon/releases/tag/v0.1.2
 [0.1.1]: https://github.com/imjustprism/holdon/releases/tag/v0.1.1
