@@ -200,7 +200,8 @@ jobs:
         with:
           files: dist/*
           generate_release_notes: true
-          draft: true
+          draft: false
+          make_latest: "legacy"
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
 
   publish:
@@ -333,26 +334,4 @@ jobs:
           git add bucket/holdon.json
           git commit -m "holdon: bump to ${version}"
           git push
-
-  publish-winget:
-    name: submit winget manifest
-    needs: release
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - name: skip if WINGET_TOKEN missing
-        id: gate
-        env:
-          TOKEN: ${{ secrets.WINGET_TOKEN }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "WINGET_TOKEN secret not configured, skipping"
-          fi
-      - if: steps.gate.outputs.skip != 'true'
-        uses: vedantmgoyal2009/winget-releaser@v2
-        with:
-          identifier: imjustprism.holdon
-          installers-regex: 'holdon-x86_64-pc-windows-msvc\.zip$'
-          token: ${{ secrets.WINGET_TOKEN }}
 
