@@ -17,9 +17,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Content-Type: application/octet-stream` unless overridden via `-H`.
 - `--timeout`, `--interval`, and related duration flags accept the
   literal strings `never`, `infinite`, and `none` (case-insensitive) as
-  "wait indefinitely" sentinels mapping to `Duration::MAX`. Bare `0`
-  still means zero duration for env-var compatibility
-  (`HOLDON_INTERVAL=0`).
+  "wait indefinitely" sentinels mapping to `Duration::MAX`.
 - Docker images now built for `linux/amd64` AND `linux/arm64`. Single
   multi-arch manifest published to `ghcr.io/imjustprism/holdon`.
 - Distribution channels live: Homebrew tap
@@ -31,6 +29,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - README install section advertises `cargo binstall`, Homebrew, and
   Scoop alongside the existing prebuilt-binaries path.
+
+### Fixed
+
+- Bare `0` keeps zero-duration semantics so env vars like
+  `HOLDON_INTERVAL=0` continue to mean "no delay" instead of being
+  silently reinterpreted as the unlimited sentinel.
 
 ## [0.2.0] - 2026-05-12
 
