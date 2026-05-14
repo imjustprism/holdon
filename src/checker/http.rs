@@ -279,7 +279,7 @@ fn evaluate_header_expectations(
                 StageKind::Http,
                 start.elapsed(),
                 format!("header `{}` contained non-ascii bytes", name.as_str()),
-                Some(hints::HTTP_HEADER_MISMATCH),
+                Some(hints::HTTP_HEADER_ENCODING),
             ));
         };
         if !pattern.is_match(value) {

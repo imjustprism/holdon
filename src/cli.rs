@@ -126,6 +126,10 @@ fn parse_header_expectation(input: &str) -> Result<HeaderExpectation, String> {
     }
     let name = HeaderName::from_bytes(name.as_bytes())
         .map_err(|e| format!("bad header name `{name}`: {e}"))?;
+    let pattern = pattern.trim();
+    if pattern.is_empty() {
+        return Err("empty header regex".into());
+    }
     let pattern = regex_lite::Regex::new(pattern).map_err(|e| format!("bad header regex: {e}"))?;
     Ok(HeaderExpectation { name, pattern })
 }
@@ -390,5 +394,29 @@ fn parse_status_range(s: &str) -> Result<(u16, u16), String> {
     } else {
         let n: u16 = s.parse().map_err(|e| format!("bad status: {e}"))?;
         Ok((n, n))
+    }
+}
+
+#[cfg(all(test, feature = "http"))]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::parse_header_expectation;
+
+    #[test]
+    fn trims_pattern_whitespace() {
+        let h = parse_header_expectation("content-type= ^application/json").unwrap();
+        assert_eq!(h.name.as_str(), "content-type");
+        assert_eq!(h.pattern.as_str(), "^application/json");
+    }
+
+    #[test]
+    fn rejects_empty_pattern_after_trim() {
+        assert!(parse_header_expectation("x-foo=   ").is_err());
+        assert!(parse_header_expectation("x-foo=").is_err());
+    }
+
+    #[test]
+    fn rejects_missing_equals() {
+        assert!(parse_header_expectation("nokey").is_err());
     }
 }
