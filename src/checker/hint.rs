@@ -49,6 +49,10 @@ pub(crate) mod hints {
         "response status was acceptable but the body did not match --expect-body-regex";
     pub(crate) const HTTP_JSON_MISMATCH: &str =
         "JSON body shape or value did not match --expect-json";
+    pub(crate) const HTTP_HEADER_MISSING: &str =
+        "expected response header was not present, check the server response";
+    pub(crate) const HTTP_HEADER_MISMATCH: &str =
+        "response header was present but did not match the --expect-header regex";
     pub(crate) const DNS_HINT: &str = "check hostname spelling and DNS server";
     pub(crate) const FILE_IO: &str = "permission or IO error reading the path";
     pub(crate) const EXEC_NOT_FOUND: &str =

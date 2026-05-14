@@ -6,6 +6,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- HTTP mutual TLS via `--client-cert PATH` + `--client-key PATH` (PEM).
+  Both env-bindable as `HOLDON_CLIENT_CERT` / `HOLDON_CLIENT_KEY`.
+- HTTP response header assertions via `--expect-header NAME=REGEX`,
+  repeatable. Missing headers fail with `HTTP_HEADER_MISSING`, value
+  mismatches with `HTTP_HEADER_MISMATCH`.
+
 ## [0.2.1] - 2026-05-12
 
 ### Added

@@ -108,6 +108,28 @@ fn parse_header_pair(input: &str) -> Result<HeaderPair, String> {
     Ok(HeaderPair { name, value })
 }
 
+#[cfg(feature = "http")]
+#[derive(Debug, Clone)]
+pub(crate) struct HeaderExpectation {
+    pub(crate) name: HeaderName,
+    pub(crate) pattern: regex_lite::Regex,
+}
+
+#[cfg(feature = "http")]
+fn parse_header_expectation(input: &str) -> Result<HeaderExpectation, String> {
+    let (name, pattern) = input
+        .split_once('=')
+        .ok_or_else(|| "expected `NAME=REGEX`".to_owned())?;
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("empty header name".into());
+    }
+    let name = HeaderName::from_bytes(name.as_bytes())
+        .map_err(|e| format!("bad header name `{name}`: {e}"))?;
+    let pattern = regex_lite::Regex::new(pattern).map_err(|e| format!("bad header regex: {e}"))?;
+    Ok(HeaderExpectation { name, pattern })
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum, Default, PartialEq, Eq)]
 pub(crate) enum OutputFormat {
     #[default]
@@ -279,6 +301,35 @@ pub(crate) struct Args {
         help = "Append PEM CA certificate(s) from PATH to the bundled webpki roots"
     )]
     pub(crate) ca_cert: Option<std::path::PathBuf>,
+
+    #[cfg(feature = "http")]
+    #[arg(
+        long,
+        value_name = "PATH",
+        env = "HOLDON_CLIENT_CERT",
+        requires = "client_key",
+        help = "Client certificate (PEM) for mutual TLS. Pair with --client-key."
+    )]
+    pub(crate) client_cert: Option<std::path::PathBuf>,
+
+    #[cfg(feature = "http")]
+    #[arg(
+        long,
+        value_name = "PATH",
+        env = "HOLDON_CLIENT_KEY",
+        requires = "client_cert",
+        help = "Client private key (PEM) for mutual TLS. Pair with --client-cert."
+    )]
+    pub(crate) client_key: Option<std::path::PathBuf>,
+
+    #[cfg(feature = "http")]
+    #[arg(
+        long = "expect-header",
+        value_name = "NAME=REGEX",
+        value_parser = parse_header_expectation,
+        help = "Response header NAME must match REGEX (repeatable)"
+    )]
+    pub(crate) expect_headers: Vec<HeaderExpectation>,
 
     #[cfg(feature = "http")]
     #[arg(long, value_enum, default_value_t = TlsMinArg::V12,

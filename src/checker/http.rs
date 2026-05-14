@@ -84,6 +84,16 @@ pub struct HttpConfig {
     /// application/octet-stream` unless the caller supplies a `Content-Type`
     /// header via [`HttpConfig::headers`].
     pub body: Option<Vec<u8>>,
+    /// Client identity for mutual TLS, as a concatenated PEM bundle containing
+    /// the certificate chain followed by the private key. Parsed once when the
+    /// shared HTTP client is built. Invalid PEM is reported on stderr and the
+    /// probe runs without client auth.
+    pub client_identity_pem: Option<Vec<u8>>,
+    /// Response header assertions. Each pair is a header name plus a regex the
+    /// header value must match. A missing header is treated as a failure with
+    /// the `HTTP_HEADER_MISSING` hint. Repeating a name applies an `AND` of
+    /// regexes against the same header.
+    pub header_expectations: Vec<(HeaderName, regex_lite::Regex)>,
 }
 
 impl HttpConfig {
@@ -159,6 +169,14 @@ fn client() -> &'static Client {
                 }
             }
         }
+        if let Some(pem) = cfg.client_identity_pem.as_deref() {
+            match reqwest::Identity::from_pem(pem) {
+                Ok(id) => b = b.identity(id),
+                Err(e) => {
+                    eprintln!("holdon: failed to load --client-cert/--client-key: {e}");
+                }
+            }
+        }
         b.build().unwrap_or_else(|_| Client::new())
     })
 }
@@ -200,6 +218,10 @@ pub(super) async fn probe(url: &Url, expect: &StatusRange, ctx: AttemptCtx) -> V
                     msg,
                     Some(hints::HTTP_RETRY),
                 )
+            } else if let Some(header_err) =
+                evaluate_header_expectations(cfg, resp.headers(), start)
+            {
+                header_err
             } else if needs_body_inspection(cfg) {
                 match read_body_capped(resp).await {
                     Ok(body) => evaluate_body_matchers(cfg, &body, start),
@@ -236,6 +258,44 @@ pub(super) async fn probe(url: &Url, expect: &StatusRange, ctx: AttemptCtx) -> V
 
 const fn needs_body_inspection(cfg: &HttpConfig) -> bool {
     cfg.body_substring.is_some() || cfg.body_regex.is_some() || cfg.body_json_match.is_some()
+}
+
+fn evaluate_header_expectations(
+    cfg: &HttpConfig,
+    headers: &HeaderMap,
+    start: Instant,
+) -> Option<Stage> {
+    for (name, pattern) in &cfg.header_expectations {
+        let Some(raw) = headers.get(name) else {
+            return Some(err_stage(
+                StageKind::Http,
+                start.elapsed(),
+                format!("expected header `{}` not present", name.as_str()),
+                Some(hints::HTTP_HEADER_MISSING),
+            ));
+        };
+        let Ok(value) = raw.to_str() else {
+            return Some(err_stage(
+                StageKind::Http,
+                start.elapsed(),
+                format!("header `{}` contained non-ascii bytes", name.as_str()),
+                Some(hints::HTTP_HEADER_MISMATCH),
+            ));
+        };
+        if !pattern.is_match(value) {
+            return Some(err_stage(
+                StageKind::Http,
+                start.elapsed(),
+                format!(
+                    "header `{}` was `{value}`, did not match regex `{}`",
+                    name.as_str(),
+                    pattern.as_str()
+                ),
+                Some(hints::HTTP_HEADER_MISMATCH),
+            ));
+        }
+    }
+    None
 }
 
 fn evaluate_body_matchers(cfg: &HttpConfig, body: &str, start: Instant) -> Stage {

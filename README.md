@@ -124,7 +124,7 @@ The argument after `--` is the command to run once every target is ready. holdon
 | Scheme                          | What it checks                            |
 | ------------------------------- | ----------------------------------------- |
 | `tcp://`, `:port`, `host:port`  | DNS resolve, TCP connect                  |
-| `http://`, `https://`           | TCP, TLS, HTTP request (`-H`, `--method`, `--expect-body`, `--expect-body-regex`, `--expect-json`, `--no-follow-redirects`, `--ca-cert`, `--tls-min`) |
+| `http://`, `https://`           | TCP, TLS, HTTP request (`-H`, `--method`, `--data`, `--expect-body`, `--expect-body-regex`, `--expect-json`, `--expect-header`, `--no-follow-redirects`, `--ca-cert`, `--client-cert` + `--client-key`, `--tls-min`) |
 | `dns://`                        | Hostname resolves                         |
 | `file:///path`                  | Path exists (`?mode=absent` inverse)      |
 | `postgres://`, `postgresql://`  | Connect + `SELECT 1` (TLS by default)     |
@@ -298,6 +298,32 @@ holdon :5432 --no-jitter --interval=250ms     # deterministic scheduling
 holdon :5432 --success-threshold=3            # protect against flapping
 holdon :5432 --initial-delay=2s               # give the service a head start
 ```
+
+### Mutual TLS (HTTPS)
+
+Send a client certificate and key for mutual TLS handshakes. PEM only; both flags must be set together.
+
+```sh
+holdon https://api.local/health \
+  --ca-cert     ./ca.pem        \
+  --client-cert ./client.pem    \
+  --client-key  ./client.key
+```
+
+Env-bindable: `HOLDON_CLIENT_CERT`, `HOLDON_CLIENT_KEY`. Invalid PEM is reported on stderr and the probe falls back to no client auth.
+
+### Header assertions
+
+Repeatable. Each `--expect-header NAME=REGEX` must match a header in the response.
+
+```sh
+holdon https://api/health \
+  --expect-status 200 \
+  --expect-header 'content-type=^application/json' \
+  --expect-header 'x-app-ready=^true$'
+```
+
+Missing header fails with `HTTP_HEADER_MISSING`; value mismatch with `HTTP_HEADER_MISMATCH`.
 
 ### Environment variables
 

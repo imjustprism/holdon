@@ -115,6 +115,25 @@ async fn run(args: Args) -> Result<ExitStatus> {
             ],
             None => Vec::new(),
         };
+        let client_identity_pem = match (args.client_cert.as_ref(), args.client_key.as_ref()) {
+            (Some(cert), Some(key)) => {
+                let mut bundle = std::fs::read(cert)
+                    .with_context(|| format!("reading --client-cert from {}", cert.display()))?;
+                let key_bytes = std::fs::read(key)
+                    .with_context(|| format!("reading --client-key from {}", key.display()))?;
+                if !bundle.ends_with(b"\n") {
+                    bundle.push(b'\n');
+                }
+                bundle.extend_from_slice(&key_bytes);
+                Some(bundle)
+            }
+            _ => None,
+        };
+        let header_expectations = args
+            .expect_headers
+            .iter()
+            .map(|h| (h.name.clone(), h.pattern.clone()))
+            .collect();
         holdon::checker::http::set_global(holdon::checker::http::HttpConfig {
             headers,
             method: args.method.into(),
@@ -126,6 +145,8 @@ async fn run(args: Args) -> Result<ExitStatus> {
             extra_ca_pem,
             min_tls: args.tls_min.into(),
             body: args.data.as_ref().map(|s| s.as_bytes().to_vec()),
+            client_identity_pem,
+            header_expectations,
         });
     }
 
