@@ -323,7 +323,7 @@ holdon https://api/health \
   --expect-header 'x-app-ready=^true$'
 ```
 
-Missing header fails with `HTTP_HEADER_MISSING`; value mismatch with `HTTP_HEADER_MISMATCH`.
+Failure hints: `HTTP_HEADER_MISSING` (header absent), `HTTP_HEADER_MISMATCH` (regex did not match the value), `HTTP_HEADER_ENCODING` (header contained non-ASCII bytes; server is sending binary or non-UTF-8 data).
 
 ### Environment variables
 
