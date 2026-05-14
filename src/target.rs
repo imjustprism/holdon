@@ -113,6 +113,7 @@ pub enum Target {
     /// rather than every schema in the database. The table name is validated
     /// at parse time (`[A-Za-z_][A-Za-z0-9_]{0,62}`) before being bound as a
     /// parameter.
+    #[non_exhaustive]
     Postgres {
         /// Full Postgres connection URL, including the `table` query
         /// parameter if present. The checker strips `table` from a clone
@@ -135,6 +136,7 @@ pub enum Target {
     /// table_schema = DATABASE()` after the readiness query, scoping the
     /// check to the database named in the URL rather than every accessible
     /// database on the server.
+    #[non_exhaustive]
     Mysql {
         /// Full `MySQL` connection URL, including the `table` query parameter
         /// if present. The checker strips `table` from a clone before
