@@ -114,7 +114,9 @@ async fn run_queries(
     if let Some(name) = expect_table {
         let row = client
             .query_opt(
-                "SELECT 1 FROM information_schema.tables WHERE table_name = $1 LIMIT 1",
+                "SELECT 1 FROM information_schema.tables \
+                 WHERE table_name = $1 AND table_schema = ANY (current_schemas(false)) \
+                 LIMIT 1",
                 &[&name],
             )
             .await?;

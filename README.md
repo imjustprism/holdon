@@ -127,8 +127,8 @@ The argument after `--` is the command to run once every target is ready. holdon
 | `http://`, `https://`           | TCP, TLS, HTTP request (`-H`, `--method`, `--data`, `--expect-body`, `--expect-body-regex`, `--expect-json`, `--expect-header`, `--no-follow-redirects`, `--ca-cert`, `--client-cert` + `--client-key`, `--tls-min`) |
 | `dns://`                        | Hostname resolves                         |
 | `file:///path`                  | Path exists (`?mode=absent` inverse)      |
-| `postgres://`, `postgresql://`  | Connect + `SELECT 1` (TLS by default). Optional `?table=NAME` verifies a table exists via `information_schema.tables` (parameterized). |
-| `mysql://`, `mariadb://`        | Connect + `SELECT 1` (TLS by default). Optional `?table=NAME` verifies a table exists via `information_schema.tables` (parameterized). |
+| `postgres://`, `postgresql://`  | Connect + `SELECT 1` (TLS by default). Optional `?table=NAME` verifies a table exists in the session's current search path via parameterized `information_schema.tables`. |
+| `mysql://`, `mariadb://`        | Connect + `SELECT 1` (TLS by default). Optional `?table=NAME` verifies a table exists in the database named in the URL via parameterized `information_schema.tables`. |
 | `redis://`, `rediss://`         | Connect + `PING` (`rediss://` for TLS)    |
 | `grpc://`, `grpcs://`           | `grpc.health.v1.Health/Check` unary (optional `/Service` path) |
 | `influxdb://`, `influxdbs://`   | `/ping` for v1, v2, v3. Optional `?expect-version=1\|2\|3` and `?token=...` (Bearer/Token auth for v3 OSS) |

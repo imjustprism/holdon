@@ -93,12 +93,14 @@ async fn connect_and_query(
     if let Some(name) = expect_table {
         let rows: Vec<u8> = conn
             .exec(
-                "SELECT 1 FROM information_schema.tables WHERE table_name = ? LIMIT 1",
+                "SELECT 1 FROM information_schema.tables \
+                 WHERE table_name = ? AND table_schema = DATABASE() \
+                 LIMIT 1",
                 (name.as_str(),),
             )
             .await?;
         if rows.is_empty() {
-            conn.disconnect().await?;
+            let _ = conn.disconnect().await;
             return Err(ProbeError::TableMissing(name));
         }
     }

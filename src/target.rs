@@ -107,12 +107,17 @@ pub enum Target {
     /// Postgres connect plus `SELECT 1`.
     ///
     /// Optional `?table=NAME` runs a parameterized
-    /// `SELECT 1 FROM information_schema.tables WHERE table_name = $1` after
-    /// the readiness query. The table name is validated at parse time
-    /// (`[A-Za-z_][A-Za-z0-9_]{0,62}`) before being bound as a parameter.
+    /// `SELECT 1 FROM information_schema.tables WHERE table_name = $1 AND
+    /// table_schema = ANY (current_schemas(false))` after the readiness
+    /// query, so the check is scoped to the session's current search path
+    /// rather than every schema in the database. The table name is validated
+    /// at parse time (`[A-Za-z_][A-Za-z0-9_]{0,62}`) before being bound as a
+    /// parameter.
     Postgres {
-        /// Full Postgres connection URL with the `table` query parameter
-        /// stripped so libpq does not reject it as unknown.
+        /// Full Postgres connection URL, including the `table` query
+        /// parameter if present. The checker strips `table` from a clone
+        /// before passing the connection string to libpq, so the driver
+        /// does not reject it as an unknown option.
         url: Url,
         /// Optional table name to verify exists.
         expect_table: Option<String>,
@@ -126,11 +131,14 @@ pub enum Target {
     /// out with `?ssl-mode=disable`. Behind the `mysql` feature.
     ///
     /// Optional `?table=NAME` runs a parameterized
-    /// `SELECT 1 FROM information_schema.tables WHERE table_name = ?` after
-    /// the readiness query.
+    /// `SELECT 1 FROM information_schema.tables WHERE table_name = ? AND
+    /// table_schema = DATABASE()` after the readiness query, scoping the
+    /// check to the database named in the URL rather than every accessible
+    /// database on the server.
     Mysql {
-        /// Full `MySQL` connection URL with the `table` query parameter
-        /// stripped so the driver does not reject it.
+        /// Full `MySQL` connection URL, including the `table` query parameter
+        /// if present. The checker strips `table` from a clone before
+        /// passing the connection string to `mysql_async`.
         url: Url,
         /// Optional table name to verify exists.
         expect_table: Option<String>,
