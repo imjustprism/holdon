@@ -94,6 +94,11 @@ pub struct HttpConfig {
     /// the `HTTP_HEADER_MISSING` hint. Repeating a name applies an `AND` of
     /// regexes against the same header.
     pub header_expectations: Vec<(HeaderName, regex_lite::Regex)>,
+    /// When `true`, the client speaks HTTP/2 prior-knowledge on every
+    /// connection. Use for cleartext h2c endpoints that do not negotiate
+    /// HTTP/2 via the HTTP/1.1 `Upgrade` header. Disables HTTP/1 entirely
+    /// for the shared client, so all targets must speak HTTP/2.
+    pub http2_prior_knowledge: bool,
 }
 
 impl HttpConfig {
@@ -151,6 +156,9 @@ fn client() -> &'static Client {
             .user_agent(concat!("holdon/", env!("CARGO_PKG_VERSION")))
             .redirect(policy)
             .min_tls_version(cfg.min_tls.into_reqwest());
+        if cfg.http2_prior_knowledge {
+            b = b.http2_prior_knowledge();
+        }
         if cfg.insecure {
             b = b.danger_accept_invalid_certs(true);
         }

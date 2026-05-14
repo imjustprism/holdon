@@ -147,6 +147,7 @@ async fn run(args: Args) -> Result<ExitStatus> {
             body: args.data.as_ref().map(|s| s.as_bytes().to_vec()),
             client_identity_pem,
             header_expectations,
+            http2_prior_knowledge: args.http2_prior_knowledge,
         });
     }
 

@@ -8,18 +8,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- `redis://...?key=NAME` runs `GET NAME` after `PING`. Probe fails if the
-  key is absent. Optional `?match=NEEDLE` or `?regex=PATTERN` further
-  asserts the value contains the substring or matches the regex. Mutually
-  exclusive, both require `?key`.
-- Hints `REDIS_KEY_MISSING` and `REDIS_VALUE_MISMATCH`.
-- Public `RedisKeyExpect` re-exported from the crate root.
-
-### Changed
-
-- `Target::Redis` variant is now `#[non_exhaustive]` and gains
-  `expect_key: Option<RedisKeyExpect>`. Pattern matches on the prior
-  `{ url }` shape need `{ url, .. }`.
+- `--http2-prior-knowledge` (env `HOLDON_HTTP2_PRIOR_KNOWLEDGE`) makes
+  the HTTP client speak HTTP/2 prior-knowledge on every connection.
+  Use for cleartext h2c endpoints that do not negotiate HTTP/2 via the
+  HTTP/1.1 `Upgrade` header. Disables HTTP/1 for all HTTP targets when
+  set.
 
 ## [0.2.1] - 2026-05-12
 
