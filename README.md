@@ -176,6 +176,138 @@ targets = [
 
 Explicit CLI flags always win over the config file. See [`examples/holdon.toml`](https://github.com/imjustprism/holdon/tree/main/examples/holdon.toml).
 
+## Recipes
+
+### Docker Compose
+
+Block an app container until its dependencies are reachable. Mount the static binary or use the published image as an init step.
+
+```yaml
+services:
+  app:
+    image: my-app
+    depends_on: [db, cache, queue]
+    entrypoint: ["/usr/local/bin/holdon"]
+    command:
+      - postgres://app:secret@db:5432
+      - redis://cache:6379
+      - amqp://queue:5672
+      - --timeout=60s
+      - --
+      - /app/start.sh
+    volumes:
+      - ./holdon:/usr/local/bin/holdon:ro
+
+  db: { image: postgres:16 }
+  cache: { image: redis:7 }
+  queue: { image: rabbitmq:3 }
+```
+
+The argument after `--` runs once every target is ready. Exits non-zero if any target misses the deadline, so Compose marks the service unhealthy.
+
+### Kubernetes initContainer
+
+```yaml
+spec:
+  initContainers:
+    - name: wait-for-deps
+      image: ghcr.io/imjustprism/holdon:latest
+      args:
+        - postgres://app:$(DB_PASSWORD)@db.default.svc:5432
+        - https://auth.default.svc/healthz
+        - kafka://broker.default.svc:9092
+        - --timeout=120s
+      env:
+        - name: DB_PASSWORD
+          valueFrom: { secretKeyRef: { name: db, key: password } }
+  containers:
+    - name: app
+      image: my-app
+```
+
+Any non-zero exit from an initContainer triggers a restart per the pod's `restartPolicy`. Use `--timeout-exit-code=<N>` only when a surrounding controller distinguishes between exit codes, otherwise the default `124` is fine.
+
+### GitHub Actions
+
+Wait for service containers before running integration tests.
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres: { image: postgres:16, ports: ["5432:5432"], env: { POSTGRES_PASSWORD: pw } }
+      redis: { image: redis:7, ports: ["6379:6379"] }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cargo-bins/cargo-binstall@v1.19.1
+      - run: cargo binstall -y holdon
+      - run: holdon :5432 :6379 --timeout=30s
+      - run: cargo test
+```
+
+### justfile / Makefile
+
+```just
+wait-deps:
+    holdon postgres://localhost:5432 redis://localhost:6379 \
+           https://api.local/health \
+           --timeout=60s --success-threshold=2
+
+dev: wait-deps
+    cargo run
+```
+
+```makefile
+.PHONY: wait-deps dev
+wait-deps:
+	holdon postgres://localhost:5432 redis://localhost:6379 --timeout=60s
+
+dev: wait-deps
+	cargo run
+```
+
+### CI teardown (reverse mode)
+
+Block on a port becoming free, a stale lock file vanishing, or a deployment finishing draining.
+
+```sh
+holdon :5432 --reverse --timeout=30s        # wait for port to close
+holdon file:///var/run/app.pid --reverse    # wait for pidfile to disappear
+holdon https://app/health --reverse         # wait for service to go down
+```
+
+### JSON output to jq
+
+```sh
+holdon postgres://db:5432 https://api/health --output json --timeout=30s \
+  | jq -c 'select(.event == "target") | {target, satisfied, attempts}'
+```
+
+Schema documented in [`docs/json-schema.md`](docs/json-schema.md). `v: 1` is stable; adding fields is non-breaking.
+
+### Retry tuning
+
+Defaults: 100ms initial, exponential doubling, 2s cap, jitter on. Override per scenario.
+
+```sh
+holdon https://slow-cold-start/health \
+  --interval=1s --max-interval=10s --timeout=5m
+
+holdon :5432 --no-jitter --interval=250ms     # deterministic scheduling
+holdon :5432 --success-threshold=3            # protect against flapping
+holdon :5432 --initial-delay=2s               # give the service a head start
+```
+
+### Environment variables
+
+Every flag has a `HOLDON_*` env var for container-friendly configuration.
+
+```sh
+HOLDON_TIMEOUT=60s HOLDON_INTERVAL=500ms HOLDON_OUTPUT=json \
+  holdon postgres://db:5432
+```
+
 ## Output modes
 
 - **Plain** (default). Live spinner, colored status, sparklines on stderr. Auto-disabled in non-TTY environments and when `NO_COLOR` is set.
