@@ -225,7 +225,7 @@ spec:
       image: my-app
 ```
 
-For lifecycle hooks that require a specific timeout code, pass `--timeout-exit-code=1` so the pod restarts instead of staying in `Error`.
+Any non-zero exit from an initContainer triggers a restart per the pod's `restartPolicy`. Use `--timeout-exit-code=<N>` only when a surrounding controller distinguishes between exit codes, otherwise the default `124` is fine.
 
 ### GitHub Actions
 
@@ -240,7 +240,7 @@ jobs:
       redis: { image: redis:7, ports: ["6379:6379"] }
     steps:
       - uses: actions/checkout@v4
-      - uses: cargo-bins/cargo-binstall@main
+      - uses: cargo-bins/cargo-binstall@v1.19.1
       - run: cargo binstall -y holdon
       - run: holdon :5432 :6379 --timeout=30s
       - run: cargo test
