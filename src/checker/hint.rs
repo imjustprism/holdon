@@ -167,21 +167,39 @@ impl Hintable for tokio_postgres::Error {
 }
 
 #[cfg(feature = "mysql")]
+mod mysql_codes {
+    pub(super) const ER_DBACCESS_DENIED: u16 = 1044;
+    pub(super) const ER_ACCESS_DENIED: u16 = 1045;
+    pub(super) const ER_BAD_DB: u16 = 1049;
+    pub(super) const ER_HOST_IS_BLOCKED: u16 = 1129;
+    pub(super) const ER_HOST_NOT_PRIVILEGED: u16 = 1130;
+    pub(super) const ER_SERVER_SHUTDOWN: u16 = 1053;
+}
+
+#[cfg(feature = "mysql")]
 impl Hintable for mysql_async::Error {
     fn hint(&self) -> Option<&'static str> {
-        let s = self.to_string().to_ascii_lowercase();
-        if s.contains("access denied") || s.contains("authentication") {
-            Some(hints::MYSQL_AUTH)
-        } else if s.contains("unknown database") {
-            Some(hints::MYSQL_NO_DB)
-        } else if s.contains("ssl") || s.contains("tls") || s.contains("certificate") {
-            Some(hints::MYSQL_TLS)
-        } else if s.contains("host") && s.contains("blocked") {
-            Some(hints::MYSQL_HOST_BLOCKED)
-        } else if s.contains("connection refused") || s.contains("server has gone away") {
-            Some(hints::MYSQL_NOT_READY)
-        } else {
-            None
+        use mysql_async::IoError;
+        use mysql_codes::{
+            ER_ACCESS_DENIED, ER_BAD_DB, ER_DBACCESS_DENIED, ER_HOST_IS_BLOCKED,
+            ER_HOST_NOT_PRIVILEGED, ER_SERVER_SHUTDOWN,
+        };
+        match self {
+            Self::Server(e) => match e.code {
+                ER_ACCESS_DENIED | ER_DBACCESS_DENIED => Some(hints::MYSQL_AUTH),
+                ER_BAD_DB => Some(hints::MYSQL_NO_DB),
+                ER_HOST_IS_BLOCKED | ER_HOST_NOT_PRIVILEGED => Some(hints::MYSQL_HOST_BLOCKED),
+                ER_SERVER_SHUTDOWN => Some(hints::MYSQL_NOT_READY),
+                _ => None,
+            },
+            Self::Io(IoError::Io(e)) => match e.kind() {
+                std::io::ErrorKind::ConnectionRefused
+                | std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::BrokenPipe => Some(hints::MYSQL_NOT_READY),
+                _ => None,
+            },
+            Self::Io(IoError::Tls(_)) => Some(hints::MYSQL_TLS),
+            Self::Driver(_) | Self::Other(_) | Self::Url(_) => None,
         }
     }
 }
@@ -199,5 +217,52 @@ impl Hintable for redis::RedisError {
             InvalidClientConfig => Some(hints::REDIS_TLS),
             _ => None,
         }
+    }
+}
+
+#[cfg(all(test, feature = "mysql"))]
+mod mysql_hint_tests {
+    use super::{Hintable, hints};
+
+    const fn server_err(code: u16) -> mysql_async::Error {
+        mysql_async::Error::Server(mysql_async::ServerError {
+            code,
+            message: String::new(),
+            state: String::new(),
+        })
+    }
+
+    #[test]
+    fn access_denied_maps_to_auth_hint() {
+        assert_eq!(server_err(1045).hint(), Some(hints::MYSQL_AUTH));
+        assert_eq!(server_err(1044).hint(), Some(hints::MYSQL_AUTH));
+    }
+
+    #[test]
+    fn bad_db_maps_to_no_db_hint() {
+        assert_eq!(server_err(1049).hint(), Some(hints::MYSQL_NO_DB));
+    }
+
+    #[test]
+    fn host_blocked_maps_to_blocked_hint() {
+        assert_eq!(server_err(1129).hint(), Some(hints::MYSQL_HOST_BLOCKED));
+        assert_eq!(server_err(1130).hint(), Some(hints::MYSQL_HOST_BLOCKED));
+    }
+
+    #[test]
+    fn server_shutdown_maps_to_not_ready() {
+        assert_eq!(server_err(1053).hint(), Some(hints::MYSQL_NOT_READY));
+    }
+
+    #[test]
+    fn unknown_server_code_has_no_hint() {
+        assert_eq!(server_err(9999).hint(), None);
+    }
+
+    #[test]
+    fn connection_refused_maps_to_not_ready() {
+        let io = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+        let e = mysql_async::Error::Io(mysql_async::IoError::Io(io));
+        assert_eq!(e.hint(), Some(hints::MYSQL_NOT_READY));
     }
 }
