@@ -24,6 +24,10 @@ pub(crate) mod hints {
     pub(crate) const REDIS_CLUSTER: &str = "cluster topology not yet stable";
     pub(crate) const REDIS_TLS: &str =
         "TLS handshake failed, check rediss:// scheme and server certificate";
+    pub(crate) const REDIS_KEY_MISSING: &str =
+        "expected key not present in redis; producer may not have written it yet";
+    pub(crate) const REDIS_VALUE_MISMATCH: &str =
+        "key was present but its value did not match the supplied matcher";
     pub(crate) const MYSQL_NOT_READY: &str = "server not accepting connections yet";
     pub(crate) const MYSQL_AUTH: &str = "check credentials in the connection URL";
     pub(crate) const MYSQL_NO_DB: &str =

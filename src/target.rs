@@ -124,9 +124,18 @@ pub enum Target {
         expect_table: Option<String>,
     },
     /// Redis connect plus `PING`.
+    ///
+    /// Optional `?key=NAME` runs `GET NAME` after the `PING`. The probe fails
+    /// if the key does not exist. With `?match=NEEDLE` or `?regex=PATTERN`,
+    /// the returned value must contain the substring or match the regex.
+    /// `?match` and `?regex` are mutually exclusive and require `?key`.
+    #[non_exhaustive]
     Redis {
-        /// Full Redis connection URL.
+        /// Full Redis connection URL with `key`, `match`, and `regex`
+        /// stripped so the driver does not reject them as unknown options.
         url: Url,
+        /// Optional key to require, with optional value matcher.
+        expect_key: Option<RedisKeyExpect>,
     },
     /// `MySQL` / `MariaDB` connect + `SELECT 1`. TLS by default (rustls), opt
     /// out with `?ssl-mode=disable`. Behind the `mysql` feature.
@@ -270,6 +279,20 @@ impl fmt::Debug for LogMatcher {
     }
 }
 
+/// Redis key existence + optional value-matcher assertion.
+///
+/// Built from `?key=NAME` plus optional `?match=NEEDLE` or `?regex=PATTERN`.
+/// `match` and `regex` are mutually exclusive and require `key`.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct RedisKeyExpect {
+    /// Key to fetch via `GET`. Must be non-empty.
+    pub key: String,
+    /// Optional matcher applied to the returned value as UTF-8. `None`
+    /// requires only that the key exists.
+    pub matcher: Option<LogMatcher>,
+}
+
 /// Whether a [`Target::File`] check waits for a path to exist or to disappear.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -351,7 +374,11 @@ impl fmt::Debug for Target {
                 .field("url", &redact(url))
                 .field("expect_table", expect_table)
                 .finish(),
-            Self::Redis { url } => f.debug_struct("Redis").field("url", &redact(url)).finish(),
+            Self::Redis { url, expect_key } => f
+                .debug_struct("Redis")
+                .field("url", &redact(url))
+                .field("expect_key", expect_key)
+                .finish(),
             Self::Mysql { url, expect_table } => f
                 .debug_struct("Mysql")
                 .field("url", &redact(url))
@@ -419,7 +446,7 @@ impl fmt::Display for Target {
                 FileMode::Absent => write!(f, "file://{}?mode=absent", path.display()),
             },
             Self::Postgres { url, .. }
-            | Self::Redis { url }
+            | Self::Redis { url, .. }
             | Self::Mysql { url, .. }
             | Self::Grpc { url, .. }
             | Self::Influxdb { url }
@@ -504,6 +531,69 @@ fn validate_sql_identifier(input: &str, name: &str, scheme: &str) -> Result<(), 
         }
     }
     Ok(())
+}
+
+fn extract_redis_expect(input: &str, url: &Url) -> Result<Option<RedisKeyExpect>> {
+    let mut key: Option<String> = None;
+    let mut needle: Option<String> = None;
+    let mut pattern: Option<String> = None;
+    for (k, v) in url.query_pairs() {
+        match k.as_ref() {
+            "key" => {
+                if key.is_some() {
+                    return Err(parse_err(input, "redis:// `?key` may appear at most once"));
+                }
+                if v.is_empty() {
+                    return Err(parse_err(input, "redis:// key cannot be empty"));
+                }
+                key = Some(v.into_owned());
+            }
+            "match" => {
+                if needle.is_some() {
+                    return Err(parse_err(
+                        input,
+                        "redis:// `?match` may appear at most once",
+                    ));
+                }
+                needle = Some(v.into_owned());
+            }
+            "regex" => {
+                if pattern.is_some() {
+                    return Err(parse_err(
+                        input,
+                        "redis:// `?regex` may appear at most once",
+                    ));
+                }
+                pattern = Some(v.into_owned());
+            }
+            _ => {}
+        }
+    }
+    let Some(key) = key else {
+        if needle.is_some() || pattern.is_some() {
+            return Err(parse_err(
+                input,
+                "redis:// `?match` and `?regex` require `?key`",
+            ));
+        }
+        return Ok(None);
+    };
+    let matcher = match (needle, pattern) {
+        (Some(_), Some(_)) => {
+            return Err(parse_err(
+                input,
+                "redis:// `?match` and `?regex` are mutually exclusive",
+            ));
+        }
+        (Some(s), None) => Some(LogMatcher::Substring(s)),
+        (None, Some(p)) => {
+            let re = regex_lite::Regex::new(&p)
+                .map_err(|e| parse_err(input, &format!("redis:// invalid `?regex`: {e}")))?;
+            Some(LogMatcher::Regex(std::sync::Arc::new(re)))
+        }
+        (None, None) => None,
+    };
+    Ok(Some(RedisKeyExpect { key, matcher }))
 }
 
 fn encode_arg(s: &str) -> String {
@@ -643,7 +733,10 @@ impl FromStr for Target {
                 let expect_table = extract_expect_table(input, &url, "postgres")?;
                 Ok(Self::Postgres { url, expect_table })
             }
-            "redis" | "rediss" => Ok(Self::Redis { url }),
+            "redis" | "rediss" => {
+                let expect_key = extract_redis_expect(input, &url)?;
+                Ok(Self::Redis { url, expect_key })
+            }
             "mysql" | "mariadb" => {
                 let expect_table = extract_expect_table(input, &url, "mysql")?;
                 Ok(Self::Mysql { url, expect_table })
@@ -1156,7 +1249,80 @@ mod tests {
     #[test]
     fn redis_url() {
         let t: Target = "redis://cache:6379".parse().unwrap();
-        assert!(matches!(t, Target::Redis { .. }));
+        assert!(matches!(
+            t,
+            Target::Redis {
+                expect_key: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn redis_expect_key_only() {
+        let t: Target = "redis://cache:6379?key=ready".parse().unwrap();
+        match t {
+            Target::Redis {
+                expect_key: Some(e),
+                ..
+            } => {
+                assert_eq!(e.key, "ready");
+                assert!(e.matcher.is_none());
+            }
+            _ => panic!("expected Redis with key"),
+        }
+    }
+
+    #[test]
+    fn redis_expect_key_with_substring_match() {
+        let t: Target = "redis://cache:6379?key=status&match=UP".parse().unwrap();
+        match t {
+            Target::Redis {
+                expect_key: Some(e),
+                ..
+            } => {
+                assert_eq!(e.key, "status");
+                assert!(matches!(e.matcher, Some(LogMatcher::Substring(ref s)) if s == "UP"));
+            }
+            _ => panic!("expected Redis with key+match"),
+        }
+    }
+
+    #[test]
+    fn redis_expect_key_with_regex() {
+        let t: Target = "redis://cache:6379?key=health&regex=^(ok|UP)$"
+            .parse()
+            .unwrap();
+        match t {
+            Target::Redis {
+                expect_key: Some(e),
+                ..
+            } => {
+                assert_eq!(e.key, "health");
+                assert!(matches!(e.matcher, Some(LogMatcher::Regex(_))));
+            }
+            _ => panic!("expected Redis with key+regex"),
+        }
+    }
+
+    #[test]
+    fn redis_match_without_key_rejected() {
+        assert!("redis://cache?match=foo".parse::<Target>().is_err());
+        assert!("redis://cache?regex=foo".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn redis_match_and_regex_mutually_exclusive() {
+        assert!(
+            "redis://cache?key=k&match=a&regex=b"
+                .parse::<Target>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn redis_empty_key_rejected() {
+        assert!("redis://cache?key=".parse::<Target>().is_err());
     }
 
     #[test]
