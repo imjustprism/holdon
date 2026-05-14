@@ -72,7 +72,9 @@ impl Target {
             #[cfg(not(feature = "http"))]
             Self::Http { .. } => disabled_stage(StageKind::Http, "http"),
             #[cfg(feature = "postgres")]
-            Self::Postgres { url } => postgres::probe(url, ctx).await,
+            Self::Postgres { url, expect_table } => {
+                postgres::probe(url, expect_table.as_deref(), ctx).await
+            }
             #[cfg(not(feature = "postgres"))]
             Self::Postgres { .. } => disabled_stage(StageKind::Postgres, "postgres"),
             #[cfg(feature = "redis")]
@@ -80,7 +82,9 @@ impl Target {
             #[cfg(not(feature = "redis"))]
             Self::Redis { .. } => disabled_stage(StageKind::Redis, "redis"),
             #[cfg(feature = "mysql")]
-            Self::Mysql { url } => mysql::probe(url, ctx).await,
+            Self::Mysql { url, expect_table } => {
+                mysql::probe(url, expect_table.as_deref(), ctx).await
+            }
             #[cfg(not(feature = "mysql"))]
             Self::Mysql { .. } => disabled_stage(StageKind::Mysql, "mysql"),
             #[cfg(feature = "grpc")]

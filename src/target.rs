@@ -105,9 +105,17 @@ pub enum Target {
         mode: FileMode,
     },
     /// Postgres connect plus `SELECT 1`.
+    ///
+    /// Optional `?table=NAME` runs a parameterized
+    /// `SELECT 1 FROM information_schema.tables WHERE table_name = $1` after
+    /// the readiness query. The table name is validated at parse time
+    /// (`[A-Za-z_][A-Za-z0-9_]{0,62}`) before being bound as a parameter.
     Postgres {
-        /// Full Postgres connection URL.
+        /// Full Postgres connection URL with the `table` query parameter
+        /// stripped so libpq does not reject it as unknown.
         url: Url,
+        /// Optional table name to verify exists.
+        expect_table: Option<String>,
     },
     /// Redis connect plus `PING`.
     Redis {
@@ -116,9 +124,16 @@ pub enum Target {
     },
     /// `MySQL` / `MariaDB` connect + `SELECT 1`. TLS by default (rustls), opt
     /// out with `?ssl-mode=disable`. Behind the `mysql` feature.
+    ///
+    /// Optional `?table=NAME` runs a parameterized
+    /// `SELECT 1 FROM information_schema.tables WHERE table_name = ?` after
+    /// the readiness query.
     Mysql {
-        /// Full `MySQL` connection URL.
+        /// Full `MySQL` connection URL with the `table` query parameter
+        /// stripped so the driver does not reject it.
         url: Url,
+        /// Optional table name to verify exists.
+        expect_table: Option<String>,
     },
     /// Run an external command, ready iff it exits 0.
     ///
@@ -321,12 +336,17 @@ impl fmt::Debug for Target {
                 .field("path", path)
                 .field("mode", mode)
                 .finish(),
-            Self::Postgres { url } => f
+            Self::Postgres { url, expect_table } => f
                 .debug_struct("Postgres")
                 .field("url", &redact(url))
+                .field("expect_table", expect_table)
                 .finish(),
             Self::Redis { url } => f.debug_struct("Redis").field("url", &redact(url)).finish(),
-            Self::Mysql { url } => f.debug_struct("Mysql").field("url", &redact(url)).finish(),
+            Self::Mysql { url, expect_table } => f
+                .debug_struct("Mysql")
+                .field("url", &redact(url))
+                .field("expect_table", expect_table)
+                .finish(),
             Self::Grpc { url, service } => f
                 .debug_struct("Grpc")
                 .field("url", &redact(url))
@@ -388,9 +408,9 @@ impl fmt::Display for Target {
                 FileMode::Present => write!(f, "file://{}", path.display()),
                 FileMode::Absent => write!(f, "file://{}?mode=absent", path.display()),
             },
-            Self::Postgres { url }
+            Self::Postgres { url, .. }
             | Self::Redis { url }
-            | Self::Mysql { url }
+            | Self::Mysql { url, .. }
             | Self::Grpc { url, .. }
             | Self::Influxdb { url }
             | Self::Mongodb { url }
@@ -416,6 +436,64 @@ impl fmt::Display for Target {
             }
         }
     }
+}
+
+const MAX_SQL_IDENT_LEN: usize = 63;
+
+fn extract_expect_table(input: &str, url: &Url, scheme: &str) -> Result<Option<String>, Error> {
+    let mut found: Option<String> = None;
+    for (k, v) in url.query_pairs() {
+        if k.as_ref() == "table" {
+            if found.is_some() {
+                return Err(parse_err(
+                    input,
+                    &format!("{scheme}:// `?table` may appear at most once"),
+                ));
+            }
+            if v.is_empty() {
+                return Err(parse_err(
+                    input,
+                    &format!("{scheme}:// table name cannot be empty"),
+                ));
+            }
+            validate_sql_identifier(input, &v, scheme)?;
+            found = Some(v.into_owned());
+        }
+    }
+    Ok(found)
+}
+
+fn validate_sql_identifier(input: &str, name: &str, scheme: &str) -> Result<(), Error> {
+    if name.len() > MAX_SQL_IDENT_LEN {
+        return Err(parse_err(
+            input,
+            &format!("{scheme}:// table name exceeds {MAX_SQL_IDENT_LEN} chars"),
+        ));
+    }
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return Err(parse_err(
+            input,
+            &format!("{scheme}:// table name cannot be empty"),
+        ));
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return Err(parse_err(
+            input,
+            &format!("{scheme}:// table name must start with ASCII letter or underscore"),
+        ));
+    }
+    for c in chars {
+        if !(c.is_ascii_alphanumeric() || c == '_') {
+            return Err(parse_err(
+                input,
+                &format!(
+                    "{scheme}:// table name has disallowed character `{c}` (use [A-Za-z0-9_])"
+                ),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn encode_arg(s: &str) -> String {
@@ -551,9 +629,15 @@ impl FromStr for Target {
                 url,
                 expect: StatusRange::default(),
             }),
-            "postgres" | "postgresql" => Ok(Self::Postgres { url }),
+            "postgres" | "postgresql" => {
+                let expect_table = extract_expect_table(input, &url, "postgres")?;
+                Ok(Self::Postgres { url, expect_table })
+            }
             "redis" | "rediss" => Ok(Self::Redis { url }),
-            "mysql" | "mariadb" => Ok(Self::Mysql { url }),
+            "mysql" | "mariadb" => {
+                let expect_table = extract_expect_table(input, &url, "mysql")?;
+                Ok(Self::Mysql { url, expect_table })
+            }
             "mongodb" | "mongodb+srv" => {
                 let host = url
                     .host_str()
@@ -988,7 +1072,75 @@ mod tests {
     #[test]
     fn postgres_url() {
         let t: Target = "postgres://app@db:5432/x".parse().unwrap();
-        assert!(matches!(t, Target::Postgres { .. }));
+        assert!(matches!(
+            t,
+            Target::Postgres {
+                expect_table: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn postgres_expect_table_extracted() {
+        let t: Target = "postgres://app@db:5432/x?table=users".parse().unwrap();
+        match t {
+            Target::Postgres { expect_table, .. } => {
+                assert_eq!(expect_table.as_deref(), Some("users"));
+            }
+            _ => panic!("expected Postgres variant"),
+        }
+    }
+
+    #[test]
+    fn mysql_expect_table_extracted() {
+        let t: Target = "mysql://app@db:3306/x?table=orders".parse().unwrap();
+        match t {
+            Target::Mysql { expect_table, .. } => {
+                assert_eq!(expect_table.as_deref(), Some("orders"));
+            }
+            _ => panic!("expected Mysql variant"),
+        }
+    }
+
+    #[test]
+    fn expect_table_rejects_invalid_identifier() {
+        assert!(
+            "postgres://app@db/x?table=users;DROP"
+                .parse::<Target>()
+                .is_err()
+        );
+        assert!(
+            "postgres://app@db/x?table=1users"
+                .parse::<Target>()
+                .is_err()
+        );
+        assert!("postgres://app@db/x?table=".parse::<Target>().is_err());
+        assert!("mysql://app@db/x?table=a-b".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn expect_table_accepts_underscored_identifier() {
+        assert!(
+            "postgres://app@db/x?table=user_accounts"
+                .parse::<Target>()
+                .is_ok()
+        );
+        assert!("mysql://app@db/x?table=_internal".parse::<Target>().is_ok());
+    }
+
+    #[test]
+    fn expect_table_rejects_overlong_name() {
+        let long = "a".repeat(64);
+        let input = format!("postgres://app@db/x?table={long}");
+        assert!(input.parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn expect_table_round_trips_in_display() {
+        let t: Target = "postgres://app@db:5432/x?table=users".parse().unwrap();
+        let shown = t.to_string();
+        assert!(shown.contains("table=users"), "got: {shown}");
     }
 
     #[test]

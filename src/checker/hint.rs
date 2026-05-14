@@ -16,6 +16,8 @@ pub(crate) mod hints {
     pub(crate) const PG_NO_DB: &str = "database does not exist (or still initializing)";
     pub(crate) const PG_STARTING: &str = "server is starting up or shutting down, keep retrying";
     pub(crate) const PG_RECOVERY: &str = "server is in recovery or read-only mode";
+    pub(crate) const PG_TABLE_MISSING: &str =
+        "expected table not found via information_schema.tables; check name and search_path";
     pub(crate) const REDIS_NOT_READY: &str = "server slow or not yet listening";
     pub(crate) const REDIS_AUTH: &str = "set the password in the URL or via AUTH";
     pub(crate) const REDIS_LOADING: &str = "redis is loading the dataset into memory";
@@ -30,6 +32,8 @@ pub(crate) mod hints {
         "TLS negotiation failed, pass ?ssl-mode=disable for plaintext or check the server cert";
     pub(crate) const MYSQL_HOST_BLOCKED: &str =
         "server blocked this host (too many connection errors); FLUSH HOSTS on the server";
+    pub(crate) const MYSQL_TABLE_MISSING: &str =
+        "expected table not found via information_schema.tables; check name and current database";
     pub(crate) const GRPC_NOT_SERVING: &str =
         "server reachable but reporting NOT_SERVING; app likely still warming up";
     pub(crate) const GRPC_UNIMPLEMENTED: &str =
