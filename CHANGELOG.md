@@ -6,8 +6,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `redis://...?key=NAME` runs `GET NAME` after `PING`. Probe fails if the
+  key is absent. Optional `?match=NEEDLE` or `?regex=PATTERN` further
+  asserts the value contains the substring or matches the regex. Mutually
+  exclusive, both require `?key`.
+- Hints `REDIS_KEY_MISSING` and `REDIS_VALUE_MISMATCH`.
+- Public `RedisKeyExpect` re-exported from the crate root.
+
 ### Changed
 
+- `Target::Redis` variant is now `#[non_exhaustive]` and gains
+  `expect_key: Option<RedisKeyExpect>`. Pattern matches on the prior
+  `{ url }` shape need `{ url, .. }`.
 - MySQL hint mapping now matches on typed `mysql_async::Error` variants
   and MySQL server error codes (1044, 1045, 1049, 1053, 1129, 1130,
   1251) rather than `to_string().contains(...)`. Adds 6 unit tests
