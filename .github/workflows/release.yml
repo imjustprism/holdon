@@ -258,141 +258,20 @@ jobs:
   bump-homebrew:
     name: bump homebrew tap
     needs: release
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - name: skip if HOMEBREW_TAP_TOKEN missing
-        id: gate
-        env:
-          TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "HOMEBREW_TAP_TOKEN secret not configured, skipping"
-          fi
-      - if: steps.gate.outputs.skip != 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: imjustprism/homebrew-holdon
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          path: homebrew-holdon
-      - if: steps.gate.outputs.skip != 'true'
-        name: bump formula
-        shell: bash
-        run: |
-          tag="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
-          version="${tag#v}"
-          sums=$(curl -fsSL "https://github.com/imjustprism/holdon/releases/download/${tag}/SHA256SUMS")
-          pick() { echo "$sums" | awk -v f="$1" '$2==f{print $1}'; }
-          mac_arm=$(pick "holdon-aarch64-apple-darwin.tar.gz")
-          mac_x86=$(pick "holdon-x86_64-apple-darwin.tar.gz")
-          lin_arm=$(pick "holdon-aarch64-unknown-linux-musl.tar.gz")
-          lin_x86=$(pick "holdon-x86_64-unknown-linux-musl.tar.gz")
-          for v in mac_arm mac_x86 lin_arm lin_x86; do
-            if [ -z "${!v}" ]; then echo "missing sha for $v" >&2; exit 1; fi
-          done
-          base="https://github.com/imjustprism/holdon/releases/download/v${version}"
-          cat > homebrew-holdon/Formula/holdon.rb <<RUBY
-          class Holdon < Formula
-            desc "Wait for anything. Know why if it doesn't."
-            homepage "https://github.com/imjustprism/holdon"
-            version "${version}"
-            license "MIT OR Apache-2.0"
-
-            on_macos do
-              on_arm do
-                url "${base}/holdon-aarch64-apple-darwin.tar.gz"
-                sha256 "${mac_arm}"
-              end
-              on_intel do
-                url "${base}/holdon-x86_64-apple-darwin.tar.gz"
-                sha256 "${mac_x86}"
-              end
-            end
-
-            on_linux do
-              on_arm do
-                url "${base}/holdon-aarch64-unknown-linux-musl.tar.gz"
-                sha256 "${lin_arm}"
-              end
-              on_intel do
-                url "${base}/holdon-x86_64-unknown-linux-musl.tar.gz"
-                sha256 "${lin_x86}"
-              end
-            end
-
-            def install
-              bin.install "holdon"
-              generate_completions_from_executable(bin/"holdon", "--generate-completion")
-            end
-
-            test do
-              assert_match "holdon", shell_output("#{bin}/holdon --version")
-            end
-          end
-          RUBY
-          cd homebrew-holdon
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Formula/holdon.rb
-          git commit -m "holdon: bump to ${version}"
-          git push
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.tag != ''
+    uses: ./.github/workflows/bump-homebrew.yml
+    with:
+      tag: ${{ github.event.inputs.tag || github.ref_name }}
+    secrets:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
   bump-scoop:
     name: bump scoop bucket
     needs: release
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - name: skip if SCOOP_BUCKET_TOKEN missing
-        id: gate
-        env:
-          TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "SCOOP_BUCKET_TOKEN secret not configured, skipping"
-          fi
-      - if: steps.gate.outputs.skip != 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: imjustprism/scoop-holdon
-          token: ${{ secrets.SCOOP_BUCKET_TOKEN }}
-          path: scoop-holdon
-      - if: steps.gate.outputs.skip != 'true'
-        name: bump scoop manifest
-        shell: bash
-        run: |
-          tag="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
-          version="${tag#v}"
-          sha=$(curl -fsSL "https://github.com/imjustprism/holdon/releases/download/${tag}/SHA256SUMS" \
-            | awk '/holdon-x86_64-pc-windows-msvc\.zip$/{print $1}')
-          if [ -z "$sha" ]; then
-            echo "could not resolve windows zip sha for ${tag}" >&2
-            exit 1
-          fi
-          cat > scoop-holdon/bucket/holdon.json <<JSON
-          {
-            "version": "${version}",
-            "description": "Wait for anything. Know why if it doesn't.",
-            "homepage": "https://github.com/imjustprism/holdon",
-            "license": "MIT OR Apache-2.0",
-            "url": "https://github.com/imjustprism/holdon/releases/download/v${version}/holdon-x86_64-pc-windows-msvc.zip",
-            "hash": "${sha}",
-            "extract_dir": "holdon-x86_64-pc-windows-msvc",
-            "bin": "holdon.exe",
-            "checkver": { "github": "https://github.com/imjustprism/holdon" },
-            "autoupdate": {
-              "url": "https://github.com/imjustprism/holdon/releases/download/v\$version/holdon-x86_64-pc-windows-msvc.zip",
-              "extract_dir": "holdon-x86_64-pc-windows-msvc",
-              "hash": { "url": "https://github.com/imjustprism/holdon/releases/download/v\$version/SHA256SUMS" }
-            }
-          }
-          JSON
-          cd scoop-holdon
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bucket/holdon.json
-          git commit -m "holdon: bump to ${version}"
-          git push
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.tag != ''
+    uses: ./.github/workflows/bump-scoop.yml
+    with:
+      tag: ${{ github.event.inputs.tag || github.ref_name }}
+    secrets:
+      SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
 

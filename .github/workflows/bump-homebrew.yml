@@ -1,0 +1,109 @@
+name: bump homebrew tap
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: tag to bump to (e.g. v0.3.0)
+        required: true
+  workflow_call:
+    inputs:
+      tag:
+        description: tag to bump to (e.g. v0.3.0)
+        required: true
+        type: string
+    secrets:
+      HOMEBREW_TAP_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    name: bump formula
+    runs-on: ubuntu-latest
+    steps:
+      - name: skip if HOMEBREW_TAP_TOKEN missing
+        id: gate
+        env:
+          TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "HOMEBREW_TAP_TOKEN secret not configured, skipping"
+          fi
+      - if: steps.gate.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: imjustprism/homebrew-holdon
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-holdon
+      - if: steps.gate.outputs.skip != 'true'
+        name: render formula
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${TAG}"
+          version="${tag#v}"
+          sums=$(curl -fsSL "https://github.com/imjustprism/holdon/releases/download/${tag}/SHA256SUMS")
+          pick() { echo "$sums" | awk -v f="$1" '$2==f{print $1}'; }
+          mac_arm=$(pick "holdon-aarch64-apple-darwin.tar.gz")
+          mac_x86=$(pick "holdon-x86_64-apple-darwin.tar.gz")
+          lin_arm=$(pick "holdon-aarch64-unknown-linux-musl.tar.gz")
+          lin_x86=$(pick "holdon-x86_64-unknown-linux-musl.tar.gz")
+          for v in mac_arm mac_x86 lin_arm lin_x86; do
+            if [ -z "${!v}" ]; then echo "missing sha for $v" >&2; exit 1; fi
+          done
+          base="https://github.com/imjustprism/holdon/releases/download/v${version}"
+          cat > homebrew-holdon/Formula/holdon.rb <<RUBY
+          class Holdon < Formula
+            desc "Wait for anything. Know why if it doesn't."
+            homepage "https://github.com/imjustprism/holdon"
+            version "${version}"
+            license "MIT OR Apache-2.0"
+
+            on_macos do
+              on_arm do
+                url "${base}/holdon-aarch64-apple-darwin.tar.gz"
+                sha256 "${mac_arm}"
+              end
+              on_intel do
+                url "${base}/holdon-x86_64-apple-darwin.tar.gz"
+                sha256 "${mac_x86}"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                url "${base}/holdon-aarch64-unknown-linux-musl.tar.gz"
+                sha256 "${lin_arm}"
+              end
+              on_intel do
+                url "${base}/holdon-x86_64-unknown-linux-musl.tar.gz"
+                sha256 "${lin_x86}"
+              end
+            end
+
+            def install
+              bin.install "holdon"
+              generate_completions_from_executable(bin/"holdon", "--generate-completion")
+            end
+
+            test do
+              assert_match "holdon", shell_output("#{bin}/holdon --version")
+            end
+          end
+          RUBY
+          cd homebrew-holdon
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet Formula/holdon.rb; then
+            echo "no change to Formula/holdon.rb"
+            exit 0
+          fi
+          git add Formula/holdon.rb
+          git commit -m "holdon: bump to ${version}"
+          git push

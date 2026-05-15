@@ -1,0 +1,84 @@
+name: bump scoop bucket
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: tag to bump to (e.g. v0.3.0)
+        required: true
+  workflow_call:
+    inputs:
+      tag:
+        description: tag to bump to (e.g. v0.3.0)
+        required: true
+        type: string
+    secrets:
+      SCOOP_BUCKET_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    name: bump manifest
+    runs-on: ubuntu-latest
+    steps:
+      - name: skip if SCOOP_BUCKET_TOKEN missing
+        id: gate
+        env:
+          TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "SCOOP_BUCKET_TOKEN secret not configured, skipping"
+          fi
+      - if: steps.gate.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: imjustprism/scoop-holdon
+          token: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+          path: scoop-holdon
+      - if: steps.gate.outputs.skip != 'true'
+        name: render manifest
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${TAG}"
+          version="${tag#v}"
+          sha=$(curl -fsSL "https://github.com/imjustprism/holdon/releases/download/${tag}/SHA256SUMS" \
+            | awk '/holdon-x86_64-pc-windows-msvc\.zip$/{print $1}')
+          if [ -z "$sha" ]; then
+            echo "could not resolve windows zip sha for ${tag}" >&2
+            exit 1
+          fi
+          cat > scoop-holdon/bucket/holdon.json <<JSON
+          {
+            "version": "${version}",
+            "description": "Wait for anything. Know why if it doesn't.",
+            "homepage": "https://github.com/imjustprism/holdon",
+            "license": "MIT OR Apache-2.0",
+            "url": "https://github.com/imjustprism/holdon/releases/download/v${version}/holdon-x86_64-pc-windows-msvc.zip",
+            "hash": "${sha}",
+            "extract_dir": "holdon-x86_64-pc-windows-msvc",
+            "bin": "holdon.exe",
+            "checkver": { "github": "https://github.com/imjustprism/holdon" },
+            "autoupdate": {
+              "url": "https://github.com/imjustprism/holdon/releases/download/v\$version/holdon-x86_64-pc-windows-msvc.zip",
+              "extract_dir": "holdon-x86_64-pc-windows-msvc",
+              "hash": { "url": "https://github.com/imjustprism/holdon/releases/download/v\$version/SHA256SUMS" }
+            }
+          }
+          JSON
+          cd scoop-holdon
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet bucket/holdon.json; then
+            echo "no change to bucket/holdon.json"
+            exit 0
+          fi
+          git add bucket/holdon.json
+          git commit -m "holdon: bump to ${version}"
+          git push
