@@ -25,6 +25,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Target::Redis` variant is now `#[non_exhaustive]` and gains
   `expect_key: Option<RedisKeyExpect>`. Pattern matches on the prior
   `{ url }` shape need `{ url, .. }`.
+- MySQL hint mapping now matches on typed `mysql_async::Error` variants
+  and MySQL server error codes (1044, 1045, 1049, 1053, 1129, 1130,
+  1251) rather than `to_string().contains(...)`. Adds 6 unit tests
+  covering each code path.
 
 ## [0.2.1] - 2026-05-12
 
