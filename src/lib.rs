@@ -1,6 +1,12 @@
 #![doc = include_str!("../README.md")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![deny(missing_docs)]
+#![forbid(unsafe_code)]
+#![deny(
+    missing_docs,
+    missing_debug_implementations,
+    unused_must_use,
+    rust_2018_idioms
+)]
 
 //! Public Rust API for the `holdon` wait-for-readiness tool.
 //!

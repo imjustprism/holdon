@@ -6,10 +6,38 @@ use lapin::{Connection, ConnectionProperties, ExchangeKind};
 use tokio::time::timeout;
 use url::Url;
 
-use super::hint::hints;
+use super::hint::{Hintable, hints};
 use super::{AttemptCtx, err_stage, install_rustls_provider_once, ok_stage};
 use crate::diagnostic::{Stage, StageKind};
 use crate::util::{format_error_chain, redact_in};
+
+mod amqp_codes {
+    pub(super) const ACCESS_REFUSED: u16 = 403;
+    pub(super) const NOT_FOUND: u16 = 404;
+    pub(super) const NOT_ALLOWED: u16 = 530;
+}
+
+impl Hintable for lapin::Error {
+    fn hint(&self) -> Option<&'static str> {
+        use amqp_codes::{ACCESS_REFUSED, NOT_ALLOWED, NOT_FOUND};
+        use lapin::ErrorKind;
+        match self.kind() {
+            ErrorKind::ProtocolError(amqp) => match amqp.get_id() {
+                ACCESS_REFUSED => Some(hints::RABBITMQ_AUTH),
+                NOT_ALLOWED => Some(hints::RABBITMQ_VHOST),
+                NOT_FOUND => Some(hints::RABBITMQ_QUEUE),
+                _ => Some(hints::RABBITMQ_NOT_READY),
+            },
+            ErrorKind::IOError(io_err) => match io_err.kind() {
+                std::io::ErrorKind::ConnectionRefused
+                | std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::BrokenPipe => Some(hints::RABBITMQ_NOT_READY),
+                _ => Some(hints::RABBITMQ_TLS),
+            },
+            _ => Some(hints::RABBITMQ_NOT_READY),
+        }
+    }
+}
 
 pub(super) async fn probe(
     url: &Url,
@@ -24,13 +52,13 @@ pub(super) async fn probe(
     let stage = match timeout(ctx.attempt_timeout, run(&conn_str, queue, exchange)).await {
         Ok(Ok(())) => ok_stage(StageKind::Rabbitmq, start.elapsed()),
         Ok(Err(e)) => {
+            let hint = e.hint();
             let mut msg = format_error_chain(&e);
             if !pw.is_empty() {
                 msg = redact_in(&msg, &conn_str);
                 msg = redact_in(&msg, &pw);
             }
-            let hint = hint_for(&msg);
-            err_stage(StageKind::Rabbitmq, start.elapsed(), msg, Some(hint))
+            err_stage(StageKind::Rabbitmq, start.elapsed(), msg, hint)
         }
         Err(_) => err_stage(
             StageKind::Rabbitmq,
@@ -92,72 +120,40 @@ fn strip_query(url: &Url) -> String {
     u.into()
 }
 
-fn hint_for(msg: &str) -> &'static str {
-    let lower = msg.to_ascii_lowercase();
-    if lower.contains("access_refused") {
-        if lower.contains("vhost") {
-            hints::RABBITMQ_VHOST
-        } else {
-            hints::RABBITMQ_AUTH
-        }
-    } else if lower.contains("not_allowed") {
-        hints::RABBITMQ_VHOST
-    } else if lower.contains("not_found")
-        || lower.contains("no queue")
-        || lower.contains("no exchange")
-    {
-        hints::RABBITMQ_QUEUE
-    } else if lower.contains("tls") || lower.contains("certificate") {
-        hints::RABBITMQ_TLS
-    } else {
-        hints::RABBITMQ_NOT_READY
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use lapin::ErrorKind;
+    use lapin::protocol::{AMQPError, AMQPErrorKind, AMQPHardError, AMQPSoftError};
 
-    #[test]
-    fn hint_for_classifies_auth() {
-        assert_eq!(
-            hint_for("ACCESS_REFUSED - Login failed"),
-            hints::RABBITMQ_AUTH
-        );
+    fn protocol_error(kind: AMQPErrorKind) -> lapin::Error {
+        let err = AMQPError::new(kind, "test".into());
+        ErrorKind::ProtocolError(err).into()
     }
 
     #[test]
-    fn hint_for_classifies_vhost() {
-        assert_eq!(
-            hint_for("ACCESS_REFUSED - vhost 'foo' not allowed"),
-            hints::RABBITMQ_VHOST
-        );
-        assert_eq!(
-            hint_for("NOT_ALLOWED - access to vhost refused"),
-            hints::RABBITMQ_VHOST
-        );
+    fn protocol_access_refused_maps_to_auth() {
+        let e = protocol_error(AMQPErrorKind::Soft(AMQPSoftError::ACCESSREFUSED));
+        assert_eq!(e.hint(), Some(hints::RABBITMQ_AUTH));
     }
 
     #[test]
-    fn hint_for_classifies_queue() {
-        assert_eq!(
-            hint_for("NOT_FOUND - no queue 'jobs'"),
-            hints::RABBITMQ_QUEUE
-        );
-        assert_eq!(
-            hint_for("no exchange 'events' in vhost '/'"),
-            hints::RABBITMQ_QUEUE
-        );
+    fn protocol_not_allowed_maps_to_vhost() {
+        let e = protocol_error(AMQPErrorKind::Hard(AMQPHardError::NOTALLOWED));
+        assert_eq!(e.hint(), Some(hints::RABBITMQ_VHOST));
     }
 
     #[test]
-    fn hint_for_classifies_tls() {
-        assert_eq!(hint_for("certificate verify failed"), hints::RABBITMQ_TLS);
+    fn protocol_not_found_maps_to_queue() {
+        let e = protocol_error(AMQPErrorKind::Soft(AMQPSoftError::NOTFOUND));
+        assert_eq!(e.hint(), Some(hints::RABBITMQ_QUEUE));
     }
 
     #[test]
-    fn hint_for_falls_back_to_not_ready() {
-        assert_eq!(hint_for("connection refused"), hints::RABBITMQ_NOT_READY);
+    fn io_connection_refused_maps_to_not_ready() {
+        let io = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+        let e: lapin::Error = ErrorKind::IOError(std::sync::Arc::new(io)).into();
+        assert_eq!(e.hint(), Some(hints::RABBITMQ_NOT_READY));
     }
 }

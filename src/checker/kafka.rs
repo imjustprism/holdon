@@ -7,7 +7,7 @@ use url::Url;
 use super::hint::{Hintable, hints};
 use super::{AttemptCtx, err_stage, install_rustls_provider_once, ok_stage};
 use crate::diagnostic::{Stage, StageKind};
-use crate::util::format_error_chain;
+use crate::util::{format_error_chain, redact_in};
 
 pub(super) async fn probe(
     url: &Url,
@@ -17,10 +17,14 @@ pub(super) async fn probe(
 ) -> Vec<Stage> {
     install_rustls_provider_once();
     let start = Instant::now();
+    let pw = url.password().unwrap_or("").to_owned();
     let stage = match timeout(ctx.attempt_timeout, run(url, topic, min_partitions)).await {
         Ok(Ok(())) => ok_stage(StageKind::Kafka, start.elapsed()),
         Ok(Err(e)) => {
-            let msg = e.to_string();
+            let mut msg = e.to_string();
+            if !pw.is_empty() {
+                msg = redact_in(&msg, &pw);
+            }
             err_stage(StageKind::Kafka, start.elapsed(), msg, e.hint())
         }
         Err(_) => err_stage(

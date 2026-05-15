@@ -2,7 +2,6 @@ pub(crate) trait Hintable {
     fn hint(&self) -> Option<&'static str>;
 }
 
-#[allow(dead_code)]
 pub(crate) mod hints {
     pub(crate) const TIMED_OUT: &str = "timed out";
     pub(crate) const SERVER_SLOW: &str = "server slow or unreachable";
