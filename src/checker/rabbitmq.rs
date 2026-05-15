@@ -35,12 +35,14 @@ impl Hintable for lapin::Error {
                 NOT_FOUND => Some(hints::RABBITMQ_QUEUE),
                 _ => Some(hints::RABBITMQ_NOT_READY),
             },
-            ErrorKind::IOError(io_err) => match io_err.kind() {
-                std::io::ErrorKind::ConnectionRefused
-                | std::io::ErrorKind::ConnectionReset
-                | std::io::ErrorKind::BrokenPipe => Some(hints::RABBITMQ_NOT_READY),
-                _ => Some(hints::RABBITMQ_TLS),
-            },
+            ErrorKind::IOError(io_err) => {
+                let lower = io_err.to_string().to_ascii_lowercase();
+                if lower.contains("tls") || lower.contains("certificate") {
+                    Some(hints::RABBITMQ_TLS)
+                } else {
+                    Some(hints::RABBITMQ_NOT_READY)
+                }
+            }
             _ => Some(hints::RABBITMQ_NOT_READY),
         }
     }
@@ -175,5 +177,19 @@ mod tests {
         let io = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
         let e: lapin::Error = ErrorKind::IOError(std::sync::Arc::new(io)).into();
         assert_eq!(e.hint(), Some(hints::RABBITMQ_NOT_READY));
+    }
+
+    #[test]
+    fn io_timed_out_maps_to_not_ready_not_tls() {
+        let io = std::io::Error::from(std::io::ErrorKind::TimedOut);
+        let e: lapin::Error = ErrorKind::IOError(std::sync::Arc::new(io)).into();
+        assert_eq!(e.hint(), Some(hints::RABBITMQ_NOT_READY));
+    }
+
+    #[test]
+    fn io_with_tls_in_message_maps_to_tls() {
+        let io = std::io::Error::other("TLS handshake failed");
+        let e: lapin::Error = ErrorKind::IOError(std::sync::Arc::new(io)).into();
+        assert_eq!(e.hint(), Some(hints::RABBITMQ_TLS));
     }
 }
