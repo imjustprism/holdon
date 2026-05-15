@@ -7,11 +7,6 @@ const MICROS_PER_HOUR: f64 = 60.0 * MICROS_PER_MIN;
 const MAX_F64_MICROS: f64 = 9_223_372_036_854_775_000.0;
 const FMT_DUR_SECS_BOUNDARY_MS: u128 = 1_000;
 
-/// Walks an error's source chain, joining each layer with `": "`, then runs
-/// the result through [`sanitize_for_terminal`].
-///
-/// Pair with [`redact_in`] at the call site if the message could embed a
-/// connection string or password.
 #[must_use]
 pub fn format_error_chain(err: &dyn std::error::Error) -> String {
     let mut out = err.to_string();
@@ -24,13 +19,6 @@ pub fn format_error_chain(err: &dyn std::error::Error) -> String {
     sanitize_for_terminal(&out)
 }
 
-/// Replaces control bytes that could otherwise be interpreted as terminal
-/// escape sequences with `\u{fffd}`.
-///
-/// Tab and newline are preserved. Every other byte below `0x20` and DEL
-/// (`0x7f`) is replaced. Blocks ANSI escape injection, carriage-return
-/// overstrike, bell-spam, and OSC title-rewrite via attacker-controlled
-/// error text.
 #[must_use]
 pub fn sanitize_for_terminal(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -44,9 +32,6 @@ pub fn sanitize_for_terminal(s: &str) -> String {
     out
 }
 
-/// Replaces every occurrence of `secret` in `text` with `***`.
-///
-/// Empty `secret` is a no-op.
 #[must_use]
 pub fn redact_in(text: &str, secret: &str) -> String {
     if secret.is_empty() {
@@ -55,16 +40,11 @@ pub fn redact_in(text: &str, secret: &str) -> String {
     text.replace(secret, "***")
 }
 
-/// Returns the duration in milliseconds, saturating at [`u64::MAX`].
 #[must_use]
 pub fn duration_ms(d: Duration) -> u64 {
     u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
 }
 
-/// Renders a duration as a short human-readable string.
-///
-/// Sub-second durations render in milliseconds (`42ms`). Longer durations
-/// render in seconds with one decimal (`1.5s`).
 #[must_use]
 pub fn fmt_dur(d: Duration) -> String {
     let ms = d.as_millis();
@@ -75,19 +55,6 @@ pub fn fmt_dur(d: Duration) -> String {
     }
 }
 
-/// Parses a duration string into a [`Duration`].
-///
-/// Accepted units: `us` / `µs`, `ms`, `s` (default if no unit), `m`, `h`.
-/// Compound forms like `1h30m` are not accepted. A bare number is interpreted
-/// as seconds for compatibility with `wait-for-it.sh`. Negative and NaN values
-/// are rejected. The literal strings `never`, `infinite`, and `none`
-/// (case-insensitive) map to [`Duration::MAX`] to denote "wait indefinitely".
-/// Bare `0` keeps its plain numeric meaning of zero duration so existing env
-/// vars like `HOLDON_INTERVAL=0` are not silently reinterpreted.
-///
-/// # Errors
-/// Returns a human-readable error string when the input is not a finite
-/// non-negative number followed by a recognized unit.
 pub fn parse_duration(s: &str) -> Result<Duration, String> {
     let s = s.trim();
     match s.to_ascii_lowercase().as_str() {

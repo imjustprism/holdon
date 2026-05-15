@@ -7,14 +7,11 @@ use holdon::parse_duration;
 use proptest::prelude::*;
 
 proptest! {
-    /// `parse_duration` never panics on any utf8 string.
     #[test]
     fn parse_duration_never_panics(s in "\\PC*") {
         let _ = parse_duration(&s);
     }
 
-    /// Round-trip: any non-negative finite f64 of millis renders into a
-    /// duration that is within 1us of the input.
     #[test]
     fn parse_duration_ms_roundtrip(ms in 0u64..1_000_000_000) {
         let s = format!("{ms}ms");
@@ -22,14 +19,12 @@ proptest! {
         prop_assert_eq!(d, Duration::from_millis(ms));
     }
 
-    /// Bare integer string parses as seconds.
     #[test]
     fn parse_duration_bare_is_seconds(secs in 0u32..86_400) {
         let d = parse_duration(&secs.to_string()).unwrap();
         prop_assert_eq!(d, Duration::from_secs(u64::from(secs)));
     }
 
-    /// Negative numbers are always rejected.
     #[test]
     fn parse_duration_rejects_negative(n in 1u32..1_000_000) {
         let s1 = format!("-{n}s");
@@ -40,13 +35,11 @@ proptest! {
 }
 
 proptest! {
-    /// `Target::from_str` never panics on any utf8 string.
     #[test]
     fn target_parse_never_panics(s in "\\PC*") {
         let _ = s.parse::<Target>();
     }
 
-    /// Any valid `host:port` round-trips through Display+parse.
     #[test]
     fn tcp_target_roundtrips(
         host in "[a-z][a-z0-9-]{0,30}",
@@ -59,7 +52,6 @@ proptest! {
         prop_assert_eq!(t.to_string(), t2.to_string());
     }
 
-    /// Shorthand `:port` always resolves to `tcp://localhost:port`.
     #[test]
     fn shorthand_port_means_localhost(port in 1u16..65535) {
         let s = format!(":{port}");
@@ -67,7 +59,6 @@ proptest! {
         prop_assert_eq!(t.to_string(), format!("tcp://localhost:{port}"));
     }
 
-    /// Bracketed IPv6 always parses successfully for valid addresses.
     #[test]
     fn ipv6_bracketed_parses(
         a in 0u16..=0xffff,
@@ -80,7 +71,6 @@ proptest! {
         prop_assert!(is_tcp);
     }
 
-    /// Any string with multiple colons but no brackets is rejected as ambiguous.
     #[test]
     fn ambiguous_ipv6_rejected(
         a in 0u16..=0xffff,

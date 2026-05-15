@@ -294,7 +294,7 @@ pub(crate) struct Args {
     #[cfg(feature = "http")]
     #[arg(
         long,
-        help = "Do not follow HTTP redirects; report the first response status"
+        help = "Do not follow HTTP redirects, report the first response status"
     )]
     pub(crate) no_follow_redirects: bool,
 

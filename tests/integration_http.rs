@@ -72,12 +72,8 @@ async fn http_204_no_content_is_ready_2xx_default() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn http_redirect_302_not_ready_under_strict_2xx() {
-    // Default StatusRange is 200..=299. A 302 response that we DO NOT follow
-    // (because the Location target doesn't exist) must NOT count as ready.
     let port = spawn_http_server(302, "moved").await;
     let target: Target = format!("http://127.0.0.1:{port}/").parse().unwrap();
     let report = run(quick_cfg(800), vec![target]).await;
-    // reqwest follows redirects up to 5; the dummy server returns 302 with no
-    // Location, which reqwest then surfaces as a redirect error → not ready.
     assert!(!report.all_ready());
 }

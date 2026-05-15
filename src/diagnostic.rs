@@ -2,96 +2,98 @@ use std::fmt;
 use std::time::Duration;
 
 /// Result of one full probe attempt against a single target.
+///
+/// Carries the ordered list of stages the probe walked through, the total
+/// wall-clock time the attempt consumed, and a final status that summarises
+/// whether the target ended ready or failed.
+///
+/// A probe may produce multiple stages even when it succeeds. An HTTP target
+/// typically emits DNS, TCP, TLS, and HTTP stages with per-stage latency.
+/// Inspect the stages when you want to see where the time went or which step
+/// actually broke.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct CheckOutcome {
-    /// Ordered list of stages, earliest first.
     pub stages: Vec<Stage>,
-    /// Total wall-clock time of this attempt, summed across all stages.
     pub total: Duration,
-    /// Aggregate verdict, derived from whether the last stage succeeded.
     pub status: Status,
 }
 
-/// Whether a [`CheckOutcome`] represents a ready target or a failure.
+/// Final readiness verdict attached to every [`CheckOutcome`].
+///
+/// `Ready` means every probe stage reported success. `Failed` covers any
+/// stage error, timeout, or unexpected condition. The reverse-mode runner
+/// inverts the verdict before reporting, so this enum always describes the
+/// raw probe outcome rather than the operator-facing decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Status {
-    /// All stages succeeded.
     Ready,
-    /// At least one stage failed or timed out.
     Failed,
 }
 
 /// One step in a multi-stage probe.
+///
+/// A stage records what kind of work it represents, how long it took, and
+/// whether it succeeded or produced a diagnostic error with an optional
+/// operator-facing hint. Probes append stages in chronological order, so the
+/// last stage is the one that decided the outcome.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Stage {
-    /// Which kind of check this stage represents.
     pub kind: StageKind,
-    /// Wall time spent in this stage.
     pub took: Duration,
-    /// Pass-or-fail with optional human-readable details.
     pub result: StageResult,
 }
 
 /// Discriminator for the kind of work a [`Stage`] performed.
 ///
-/// String names are stable across releases via [`StageKind::as_str`]. Adding
-/// new variants is non-breaking thanks to `#[non_exhaustive]`.
+/// Each variant corresponds to a specific probe phase such as DNS lookup,
+/// TCP connect, TLS handshake, or a protocol-specific roundtrip. The
+/// machine-stable wire name for each variant is exposed via
+/// [`StageKind::as_str`] and is part of the `--output json` schema.
+///
+/// The enum is `#[non_exhaustive]` so adding a new probe protocol does not
+/// break downstream consumers. Match exhaustively where the project owns
+/// every variant, and use a wildcard arm at external boundaries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum StageKind {
-    /// Hostname resolution via the system resolver.
     Dns,
-    /// TCP socket connection.
     Tcp,
-    /// HTTP request and status check.
     Http,
-    /// Filesystem existence check for `file://` targets.
     File,
-    /// Postgres connect plus `SELECT 1`.
     Postgres,
-    /// Redis connect plus `PING`.
     Redis,
-    /// `MySQL` connect plus `SELECT 1`.
     Mysql,
-    /// External command invocation for `exec://` targets.
     Exec,
-    /// gRPC `Health/Check` unary call.
     Grpc,
-    /// Log file content match for `log://` targets.
     Log,
-    /// `InfluxDB` `/ping` health probe for `influxdb://` targets.
     Influxdb,
-    /// `MongoDB` connect plus admin `ping` command.
     Mongodb,
-    /// `RabbitMQ` AMQP connection (optionally passive-declare a queue or exchange).
     Rabbitmq,
-    /// `Kafka` broker metadata fetch (optionally checks topic + partition count).
     Kafka,
-    /// `Temporal` server gRPC `Health/Check` against `WorkflowService`.
     Temporal,
 }
 
 /// Outcome of a single [`Stage`].
+///
+/// The success variant carries no payload. The error variant carries a
+/// formatted message describing what went wrong, plus an optional one-line
+/// operator hint pointing at a likely fix. Hints are sourced from the
+/// internal hint catalogue, so the same hint text appears across releases
+/// for the same root cause.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum StageResult {
-    /// Stage succeeded.
     Ok,
-    /// Stage failed, with a sanitized message and optional hint.
     Err {
-        /// Sanitized error message with control bytes stripped and known
-        /// secrets replaced with `***`.
         message: Box<str>,
-        /// Optional one-line hint pointing at a likely fix.
         hint: Option<Box<str>>,
     },
 }
 
 impl CheckOutcome {
-    /// Builds a [`CheckOutcome`] with [`Status::Ready`].
     #[must_use]
     pub const fn ready(stages: Vec<Stage>, total: Duration) -> Self {
         Self {
@@ -101,7 +103,6 @@ impl CheckOutcome {
         }
     }
 
-    /// Builds a [`CheckOutcome`] with [`Status::Failed`].
     #[must_use]
     pub const fn failed(stages: Vec<Stage>, total: Duration) -> Self {
         Self {
@@ -111,7 +112,6 @@ impl CheckOutcome {
         }
     }
 
-    /// Returns `true` if the outcome is [`Status::Ready`].
     #[must_use]
     pub const fn is_ready(&self) -> bool {
         matches!(self.status, Status::Ready)
@@ -119,10 +119,6 @@ impl CheckOutcome {
 }
 
 impl StageKind {
-    /// Returns the stable machine-readable identifier for this stage kind.
-    ///
-    /// Used in JSON output and structured logs. The string for an existing
-    /// variant will not change.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {

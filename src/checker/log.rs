@@ -8,10 +8,6 @@ use super::{err_stage, ok_stage};
 use crate::diagnostic::{Stage, StageKind};
 use crate::target::LogMatcher;
 
-/// Maximum bytes read from the log file per attempt. If the file is larger,
-/// only the trailing `LOG_TAIL_BYTES` are scanned. Bounds memory and gives
-/// "tail" semantics so a freshly appended `Listening on...` line surfaces
-/// even when the historical log is huge.
 const LOG_TAIL_BYTES: u64 = 1_024 * 1_024;
 
 pub(super) async fn probe(path: &Path, matcher: &LogMatcher) -> Vec<Stage> {

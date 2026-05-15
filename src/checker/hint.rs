@@ -17,7 +17,7 @@ pub(crate) mod hints {
     pub(crate) const PG_STARTING: &str = "server is starting up or shutting down, keep retrying";
     pub(crate) const PG_RECOVERY: &str = "server is in recovery or read-only mode";
     pub(crate) const PG_TABLE_MISSING: &str =
-        "expected table not found via information_schema.tables; check name and search_path";
+        "expected table not found via information_schema.tables, check name and search_path";
     pub(crate) const REDIS_NOT_READY: &str = "server slow or not yet listening";
     pub(crate) const REDIS_AUTH: &str = "set the password in the URL or via AUTH";
     pub(crate) const REDIS_LOADING: &str = "redis is loading the dataset into memory";
@@ -25,7 +25,7 @@ pub(crate) mod hints {
     pub(crate) const REDIS_TLS: &str =
         "TLS handshake failed, check rediss:// scheme and server certificate";
     pub(crate) const REDIS_KEY_MISSING: &str =
-        "expected key not present in redis; producer may not have written it yet";
+        "expected key not present in redis, producer may not have written it yet";
     pub(crate) const REDIS_VALUE_MISMATCH: &str =
         "key was present but its value did not match the supplied matcher";
     pub(crate) const MYSQL_NOT_READY: &str = "server not accepting connections yet";
@@ -35,21 +35,21 @@ pub(crate) mod hints {
     pub(crate) const MYSQL_TLS: &str =
         "TLS negotiation failed, pass ?ssl-mode=disable for plaintext or check the server cert";
     pub(crate) const MYSQL_HOST_BLOCKED: &str =
-        "server blocked this host (too many connection errors); FLUSH HOSTS on the server";
+        "server blocked this host (too many connection errors), FLUSH HOSTS on the server";
     pub(crate) const MYSQL_TABLE_MISSING: &str =
-        "expected table not found via information_schema.tables; check name and current database";
+        "expected table not found via information_schema.tables, check name and current database";
     pub(crate) const GRPC_NOT_SERVING: &str =
-        "server reachable but reporting NOT_SERVING; app likely still warming up";
+        "server reachable but reporting NOT_SERVING, app likely still warming up";
     pub(crate) const GRPC_UNIMPLEMENTED: &str =
-        "server does not implement grpc.health.v1.Health; check the service is registered";
+        "server does not implement grpc.health.v1.Health, check the service is registered";
     pub(crate) const GRPC_SERVICE_UNKNOWN: &str =
-        "server is up but does not know this service name; check the URL path";
+        "server is up but does not know this service name, check the URL path";
     pub(crate) const GRPC_AUTH: &str = "missing or invalid credentials for the health endpoint";
     pub(crate) const GRPC_TLS: &str =
-        "TLS handshake failed for grpcs://; verify server cert and SNI";
-    pub(crate) const GRPC_UNAVAILABLE: &str = "server transient unavailable; will keep retrying";
+        "TLS handshake failed for grpcs://, verify server cert and SNI";
+    pub(crate) const GRPC_UNAVAILABLE: &str = "server transient unavailable, will keep retrying";
     pub(crate) const GRPC_DEADLINE: &str =
-        "server did not respond in time; raise --attempt-timeout";
+        "server did not respond in time, raise --attempt-timeout";
     pub(crate) const HTTP_RETRY: &str = "service may still be initializing";
     pub(crate) const HTTP_BODY_MISMATCH: &str =
         "response status was acceptable but the body did not match --expect-body";
@@ -61,7 +61,7 @@ pub(crate) mod hints {
         "expected response header was not present, check the server response";
     pub(crate) const HTTP_HEADER_MISMATCH: &str =
         "response header was present but did not match the --expect-header regex";
-    pub(crate) const HTTP_HEADER_ENCODING: &str = "response header contained non-ASCII bytes; the server is sending binary or non-UTF-8 data, not a regex mismatch";
+    pub(crate) const HTTP_HEADER_ENCODING: &str = "response header contained non-ASCII bytes, the server is sending binary or non-UTF-8 data, not a regex mismatch";
     pub(crate) const DNS_HINT: &str = "check hostname spelling and DNS server";
     pub(crate) const FILE_IO: &str = "permission or IO error reading the path";
     pub(crate) const EXEC_NOT_FOUND: &str =
@@ -71,7 +71,7 @@ pub(crate) mod hints {
     pub(crate) const EXEC_TIMED_OUT: &str =
         "child did not finish before attempt timeout, increase --attempt-timeout";
     pub(crate) const LOG_NOT_YET: &str =
-        "pattern not yet in log, app may still be starting; will keep checking";
+        "pattern not yet in log, app may still be starting, will keep checking";
     pub(crate) const LOG_PATH: &str =
         "log file is missing, check the path and that the producer has started writing";
     pub(crate) const INFLUXDB_NOT_READY: &str =
