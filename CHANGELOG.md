@@ -14,6 +14,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   exclusive, both require `?key`.
 - Hints `REDIS_KEY_MISSING` and `REDIS_VALUE_MISMATCH`.
 - Public `RedisKeyExpect` re-exported from the crate root.
+- `--http2-prior-knowledge` (env `HOLDON_HTTP2_PRIOR_KNOWLEDGE`) makes
+  the HTTP client speak HTTP/2 prior-knowledge on every connection.
+  Use for cleartext h2c endpoints that do not negotiate HTTP/2 via the
+  HTTP/1.1 `Upgrade` header. Disables HTTP/1 for all HTTP targets when
+  set.
 
 ### Changed
 
