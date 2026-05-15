@@ -210,3 +210,22 @@ where
         Err(_) => err_stage(kind, attempt_timeout, hints::TIMED_OUT, Some(timeout_hint)),
     }
 }
+
+#[allow(dead_code)]
+pub(crate) fn strip_query_keys(url: &url::Url, drop: &[&str]) -> url::Url {
+    let kept: Vec<(String, String)> = url
+        .query_pairs()
+        .filter(|(k, _)| !drop.contains(&k.as_ref()))
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    let mut out = url.clone();
+    if kept.is_empty() {
+        out.set_query(None);
+    } else {
+        let q = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(kept.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+            .finish();
+        out.set_query(Some(&q));
+    }
+    out
+}

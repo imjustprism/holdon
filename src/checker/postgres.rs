@@ -13,7 +13,7 @@ use crate::diagnostic::{Stage, StageKind};
 pub(super) async fn probe(url: &Url, expect_table: Option<&str>, ctx: AttemptCtx) -> Vec<Stage> {
     let pw = url.password().unwrap_or("").to_owned();
     let want_tls = !sslmode_disabled(url);
-    let driver_url = strip_table_param(url);
+    let driver_url = super::strip_query_keys(url, &["table"]);
     let driver_str = driver_url.as_str().to_owned();
     let table = expect_table.map(str::to_owned);
     vec![
@@ -31,24 +31,6 @@ pub(super) async fn probe(url: &Url, expect_table: Option<&str>, ctx: AttemptCtx
 fn sslmode_disabled(url: &Url) -> bool {
     url.query_pairs()
         .any(|(k, v)| k.eq_ignore_ascii_case("sslmode") && v.eq_ignore_ascii_case("disable"))
-}
-
-fn strip_table_param(url: &Url) -> Url {
-    let kept: Vec<(String, String)> = url
-        .query_pairs()
-        .filter(|(k, _)| k.as_ref() != "table")
-        .map(|(k, v)| (k.into_owned(), v.into_owned()))
-        .collect();
-    let mut out = url.clone();
-    if kept.is_empty() {
-        out.set_query(None);
-    } else {
-        let q = url::form_urlencoded::Serializer::new(String::new())
-            .extend_pairs(kept.iter().map(|(k, v)| (k.as_str(), v.as_str())))
-            .finish();
-        out.set_query(Some(&q));
-    }
-    out
 }
 
 #[derive(Debug, thiserror::Error)]

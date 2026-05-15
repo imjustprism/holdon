@@ -95,21 +95,22 @@ pub enum StageResult {
 
 impl CheckOutcome {
     #[must_use]
-    pub const fn ready(stages: Vec<Stage>, total: Duration) -> Self {
+    pub const fn new(stages: Vec<Stage>, total: Duration, status: Status) -> Self {
         Self {
             stages,
             total,
-            status: Status::Ready,
+            status,
         }
     }
 
     #[must_use]
+    pub const fn ready(stages: Vec<Stage>, total: Duration) -> Self {
+        Self::new(stages, total, Status::Ready)
+    }
+
+    #[must_use]
     pub const fn failed(stages: Vec<Stage>, total: Duration) -> Self {
-        Self {
-            stages,
-            total,
-            status: Status::Failed,
-        }
+        Self::new(stages, total, Status::Failed)
     }
 
     #[must_use]
@@ -119,46 +120,34 @@ impl CheckOutcome {
 }
 
 impl StageKind {
+    const fn info(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Dns => ("dns", "DNS resolution"),
+            Self::Tcp => ("tcp", "TCP connect"),
+            Self::Http => ("http", "HTTP request"),
+            Self::File => ("file", "filesystem"),
+            Self::Postgres => ("postgres", "Postgres query"),
+            Self::Redis => ("redis", "Redis PING"),
+            Self::Mysql => ("mysql", "MySQL query"),
+            Self::Exec => ("exec", "external command"),
+            Self::Grpc => ("grpc", "gRPC health"),
+            Self::Log => ("log", "log file match"),
+            Self::Influxdb => ("influxdb", "InfluxDB ping"),
+            Self::Mongodb => ("mongodb", "MongoDB ping"),
+            Self::Rabbitmq => ("rabbitmq", "RabbitMQ AMQP"),
+            Self::Kafka => ("kafka", "Kafka metadata"),
+            Self::Temporal => ("temporal", "Temporal health"),
+        }
+    }
+
     #[must_use]
     pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Dns => "dns",
-            Self::Tcp => "tcp",
-            Self::Http => "http",
-            Self::File => "file",
-            Self::Postgres => "postgres",
-            Self::Redis => "redis",
-            Self::Mysql => "mysql",
-            Self::Exec => "exec",
-            Self::Grpc => "grpc",
-            Self::Log => "log",
-            Self::Influxdb => "influxdb",
-            Self::Mongodb => "mongodb",
-            Self::Rabbitmq => "rabbitmq",
-            Self::Kafka => "kafka",
-            Self::Temporal => "temporal",
-        }
+        self.info().0
     }
 }
 
 impl fmt::Display for StageKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Dns => "DNS resolution",
-            Self::Tcp => "TCP connect",
-            Self::Http => "HTTP request",
-            Self::File => "filesystem",
-            Self::Postgres => "Postgres query",
-            Self::Redis => "Redis PING",
-            Self::Mysql => "MySQL query",
-            Self::Exec => "external command",
-            Self::Grpc => "gRPC health",
-            Self::Log => "log file match",
-            Self::Influxdb => "InfluxDB ping",
-            Self::Mongodb => "MongoDB ping",
-            Self::Rabbitmq => "RabbitMQ AMQP",
-            Self::Kafka => "Kafka metadata",
-            Self::Temporal => "Temporal health",
-        })
+        f.write_str(self.info().1)
     }
 }

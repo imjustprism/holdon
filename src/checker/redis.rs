@@ -11,7 +11,7 @@ pub(super) async fn probe(
     ctx: AttemptCtx,
 ) -> Vec<Stage> {
     let pw = url.password().unwrap_or("").to_owned();
-    let driver_url = strip_redis_query(url);
+    let driver_url = super::strip_query_keys(url, &["key", "match", "regex"]);
     let driver_str = driver_url.as_str().to_owned();
     let expect = expect_key.cloned();
     vec![
@@ -24,24 +24,6 @@ pub(super) async fn probe(
         )
         .await,
     ]
-}
-
-fn strip_redis_query(url: &Url) -> Url {
-    let kept: Vec<(String, String)> = url
-        .query_pairs()
-        .filter(|(k, _)| !matches!(k.as_ref(), "key" | "match" | "regex"))
-        .map(|(k, v)| (k.into_owned(), v.into_owned()))
-        .collect();
-    let mut out = url.clone();
-    if kept.is_empty() {
-        out.set_query(None);
-    } else {
-        let q = url::form_urlencoded::Serializer::new(String::new())
-            .extend_pairs(kept.iter().map(|(k, v)| (k.as_str(), v.as_str())))
-            .finish();
-        out.set_query(Some(&q));
-    }
-    out
 }
 
 #[derive(Debug, thiserror::Error)]
