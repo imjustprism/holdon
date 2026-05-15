@@ -13,10 +13,8 @@ use holdon::runner::{Event, Report, TargetReport};
 use holdon::util::fmt_dur;
 
 #[derive(Debug)]
-#[allow(clippy::struct_excessive_bools)]
 pub(crate) struct Plain {
     style: Style,
-    quiet: bool,
     states: Vec<Slot>,
     started: Instant,
     last_lines: u16,
@@ -79,10 +77,9 @@ impl SlotState {
 }
 
 impl Plain {
-    pub(crate) fn new(color: bool, quiet: bool) -> Self {
+    pub(crate) fn new(color: bool) -> Self {
         Self {
             style: Style::new(color),
-            quiet,
             states: Vec::new(),
             started: Instant::now(),
             last_lines: 0,
@@ -93,7 +90,7 @@ impl Plain {
     }
 
     pub(crate) fn tick(&mut self) {
-        if self.quiet || !self.live {
+        if !self.live {
             return;
         }
         let active = self
@@ -113,9 +110,6 @@ impl Plain {
     }
 
     pub(crate) fn banner(&mut self, targets: &[Target], cmd: Option<&[String]>) {
-        if self.quiet {
-            return;
-        }
         self.started = Instant::now();
         self.states = targets
             .iter()
@@ -138,9 +132,6 @@ impl Plain {
     }
 
     pub(crate) fn handle(&mut self, ev: &Event) {
-        if self.quiet {
-            return;
-        }
         #[allow(clippy::wildcard_enum_match_arm)]
         match ev {
             Event::Attempt {
@@ -201,9 +192,6 @@ impl Plain {
     }
 
     pub(crate) fn summary(&mut self, report: &Report, exec: Option<&[String]>) {
-        if self.quiet {
-            return;
-        }
         self.redraw();
 
         for r in &report.results {

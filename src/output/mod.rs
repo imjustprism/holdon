@@ -31,7 +31,7 @@ pub(crate) enum Printer {
 impl Printer {
     pub(crate) fn new(format: Format, color: bool) -> Self {
         match format {
-            Format::Plain => Self::Plain(Plain::new(color, false)),
+            Format::Plain => Self::Plain(Plain::new(color)),
             Format::Quiet => Self::Quiet,
             #[cfg(feature = "json-output")]
             Format::Json => Self::Json(json::Json::new()),

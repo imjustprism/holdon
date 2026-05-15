@@ -159,8 +159,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_zero_as_zero_not_unlimited() {
-        // env-var compatibility: HOLDON_INTERVAL=0 must keep meaning "no delay"
+    fn parses_zero_as_zero_so_holdon_interval_zero_means_no_delay() {
         assert_eq!(parse_duration("0").unwrap(), Duration::ZERO);
         assert_eq!(parse_duration("0s").unwrap(), Duration::ZERO);
     }

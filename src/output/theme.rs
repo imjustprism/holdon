@@ -16,7 +16,6 @@ pub(crate) const SPINNER_INTERVAL_MS: u64 = 80;
 pub(crate) const SPARK: &[char] = &['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum Color {
     Waiting,
     Ready,

@@ -1,3 +1,6 @@
+#![forbid(unsafe_code)]
+#![deny(unused_must_use, rust_2018_idioms)]
+
 mod cli;
 mod config;
 mod output;

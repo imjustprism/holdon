@@ -10,6 +10,15 @@ use url::Url;
 use super::hint::hints;
 use super::{AttemptCtx, err_stage, ok_stage};
 use crate::diagnostic::{Stage, StageKind};
+use crate::util::redact_in;
+
+fn redact_pw(msg: String, pw: &str) -> String {
+    if pw.is_empty() {
+        msg
+    } else {
+        redact_in(&msg, pw)
+    }
+}
 
 const HEALTH_PATH: &str = "/grpc.health.v1.Health/Check";
 
@@ -36,27 +45,28 @@ enum ServingStatus {
 
 pub(super) async fn probe(url: &Url, service: &str, ctx: AttemptCtx) -> Vec<Stage> {
     let start = Instant::now();
+    let pw = url.password().unwrap_or("").to_owned();
     match probe_inner(url, service, ctx).await {
         Ok(()) => vec![ok_stage(StageKind::Grpc, start.elapsed())],
         Err(ProbeError::Connect(e)) => vec![err_stage(
             StageKind::Grpc,
             start.elapsed(),
-            format!("connect: {e}"),
+            redact_pw(format!("connect: {e}"), &pw),
             Some(hints::PORT_CLOSED),
         )],
         Err(ProbeError::Tls(e)) => vec![err_stage(
             StageKind::Grpc,
             start.elapsed(),
-            format!("tls config: {e}"),
+            redact_pw(format!("tls config: {e}"), &pw),
             Some(hints::GRPC_TLS),
         )],
         Err(ProbeError::Endpoint(e)) => vec![err_stage(
             StageKind::Grpc,
             start.elapsed(),
-            format!("endpoint: {e}"),
+            redact_pw(format!("endpoint: {e}"), &pw),
             None,
         )],
-        Err(ProbeError::Rpc(status)) => vec![rpc_failure_stage(&status, start)],
+        Err(ProbeError::Rpc(status)) => vec![rpc_failure_stage(&status, start, &pw)],
         Err(ProbeError::NotServing(name)) => vec![err_stage(
             StageKind::Grpc,
             start.elapsed(),
@@ -76,7 +86,7 @@ pub(super) async fn probe(url: &Url, service: &str, ctx: AttemptCtx) -> Vec<Stag
     }
 }
 
-fn rpc_failure_stage(status: &Status, start: Instant) -> Stage {
+fn rpc_failure_stage(status: &Status, start: Instant, pw: &str) -> Stage {
     let hint = match status.code() {
         Code::Unimplemented => Some(hints::GRPC_UNIMPLEMENTED),
         Code::NotFound => Some(hints::GRPC_SERVICE_UNKNOWN),
@@ -88,7 +98,7 @@ fn rpc_failure_stage(status: &Status, start: Instant) -> Stage {
     err_stage(
         StageKind::Grpc,
         start.elapsed(),
-        format!("rpc {:?}: {}", status.code(), status.message()),
+        redact_pw(format!("rpc {:?}: {}", status.code(), status.message()), pw),
         hint,
     )
 }
