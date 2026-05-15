@@ -16,7 +16,17 @@ impl Hintable for mongodb::error::Error {
         match self.kind.as_ref() {
             ErrorKind::Authentication { .. } => Some(hints::MONGODB_AUTH),
             ErrorKind::InvalidTlsConfig { .. } => Some(hints::MONGODB_TLS),
-            ErrorKind::ServerSelection { .. } => Some(hints::MONGODB_NO_PRIMARY),
+            ErrorKind::ServerSelection { message, .. } => {
+                let lower = message.to_ascii_lowercase();
+                if lower.contains("no primary")
+                    || lower.contains("replicasetnoprimary")
+                    || lower.contains("replica set")
+                {
+                    Some(hints::MONGODB_NO_PRIMARY)
+                } else {
+                    Some(hints::MONGODB_NOT_READY)
+                }
+            }
             _ => Some(hints::MONGODB_NOT_READY),
         }
     }

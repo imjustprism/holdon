@@ -23,7 +23,14 @@ impl Hintable for lapin::Error {
         use lapin::ErrorKind;
         match self.kind() {
             ErrorKind::ProtocolError(amqp) => match amqp.get_id() {
-                ACCESS_REFUSED => Some(hints::RABBITMQ_AUTH),
+                ACCESS_REFUSED => {
+                    let msg = amqp.get_message().as_str().to_ascii_lowercase();
+                    if msg.contains("vhost") {
+                        Some(hints::RABBITMQ_VHOST)
+                    } else {
+                        Some(hints::RABBITMQ_AUTH)
+                    }
+                }
                 NOT_ALLOWED => Some(hints::RABBITMQ_VHOST),
                 NOT_FOUND => Some(hints::RABBITMQ_QUEUE),
                 _ => Some(hints::RABBITMQ_NOT_READY),
@@ -128,7 +135,11 @@ mod tests {
     use lapin::protocol::{AMQPError, AMQPErrorKind, AMQPHardError, AMQPSoftError};
 
     fn protocol_error(kind: AMQPErrorKind) -> lapin::Error {
-        let err = AMQPError::new(kind, "test".into());
+        protocol_error_with(kind, "test")
+    }
+
+    fn protocol_error_with(kind: AMQPErrorKind, message: &str) -> lapin::Error {
+        let err = AMQPError::new(kind, message.into());
         ErrorKind::ProtocolError(err).into()
     }
 
@@ -136,6 +147,15 @@ mod tests {
     fn protocol_access_refused_maps_to_auth() {
         let e = protocol_error(AMQPErrorKind::Soft(AMQPSoftError::ACCESSREFUSED));
         assert_eq!(e.hint(), Some(hints::RABBITMQ_AUTH));
+    }
+
+    #[test]
+    fn protocol_access_refused_with_vhost_message_maps_to_vhost() {
+        let e = protocol_error_with(
+            AMQPErrorKind::Soft(AMQPSoftError::ACCESSREFUSED),
+            "access to vhost 'foo' refused",
+        );
+        assert_eq!(e.hint(), Some(hints::RABBITMQ_VHOST));
     }
 
     #[test]
