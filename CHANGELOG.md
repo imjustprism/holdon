@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-05-15
 
 ### Added
 
@@ -19,6 +19,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Use for cleartext h2c endpoints that do not negotiate HTTP/2 via the
   HTTP/1.1 `Upgrade` header. Disables HTTP/1 for all HTTP targets when
   set.
+- HTTP probes accept `--expect-header NAME[=VALUE]` (env
+  `HOLDON_EXPECT_HEADER`) and `--expect-header-regex NAME=PATTERN` to
+  assert response headers. Repeatable. Fails with dedicated hints when
+  the header is missing or the value mismatches.
+- HTTP probes accept `--client-cert PATH` and `--client-key PATH` for
+  mutual TLS (mTLS) against servers that require client certificates.
+  PEM-encoded. Hints distinguish missing-cert, bad-key, and rejected-by-
+  server cases.
+- `postgres://...?table=NAME` and `mysql://...?table=NAME` perform an
+  `information_schema.tables` lookup after the connect probe. Fails with
+  `PG_TABLE_MISSING` / `MYSQL_TABLE_MISSING` when absent.
+- Integration recipes in `docs/`: docker-compose health-gate, Kubernetes
+  init container, GitHub Actions CI gate, jq pipelines over `--output
+  json`.
 
 ### Changed
 
@@ -29,6 +43,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and MySQL server error codes (1044, 1045, 1049, 1053, 1129, 1130,
   1251) rather than `to_string().contains(...)`. Adds 6 unit tests
   covering each code path.
+- Release pipeline publishes the GitHub Release immediately on tag push
+  rather than waiting for downstream package-manager submissions.
+
+### Internal
+
+- Crate roots hardened, hint mapping unified onto a `Hintable` trait,
+  password redaction patched on every error path, dead code removed.
+- Source comments trimmed to type-level doc on `pub` items only; net
+  reduction across `target.rs`, `runner.rs`, `http.rs`, DB probes, and
+  diagnostic types via shared helpers (`strip_query_keys`,
+  `truncate_ellipsis`, `local_file_path`, `StageKind::info`).
 
 ## [0.2.1] - 2026-05-12
 
