@@ -342,11 +342,9 @@ impl fmt::Display for Target {
             | Self::Temporal { url } => write!(f, "{}", redact(url)),
             Self::Exec { program, args } => {
                 write!(f, "exec://{}", program.display())?;
-                let mut first = true;
-                for a in args {
-                    f.write_str(if first { "?" } else { "&" })?;
-                    first = false;
-                    write!(f, "arg={}", encode_arg(a))?;
+                for (i, a) in args.iter().enumerate() {
+                    let sep = if i == 0 { '?' } else { '&' };
+                    write!(f, "{sep}arg={}", encode_arg(a))?;
                 }
                 Ok(())
             }
@@ -507,6 +505,28 @@ fn encode_arg(s: &str) -> String {
 fn is_unc_or_remote(path: &std::path::Path) -> bool {
     let s = path.to_string_lossy();
     s.starts_with(r"\\") || s.starts_with("//")
+}
+
+fn local_file_path(url: &Url, input: &str, scheme: &str) -> Result<PathBuf> {
+    let host_remote = url
+        .host_str()
+        .is_some_and(|h| !h.is_empty() && !h.eq_ignore_ascii_case("localhost"));
+    if host_remote || url.path().starts_with("//") {
+        return Err(parse_err(
+            input,
+            &format!("remote/UNC {scheme} paths are refused (NTLM-relay risk)"),
+        ));
+    }
+    let path = url
+        .to_file_path()
+        .map_err(|()| parse_err(input, &format!("invalid {scheme} path")))?;
+    if is_unc_or_remote(&path) {
+        return Err(parse_err(
+            input,
+            &format!("remote/UNC {scheme} paths are refused (NTLM-relay risk)"),
+        ));
+    }
+    Ok(path)
 }
 
 fn redact(url: &Url) -> String {
@@ -800,24 +820,7 @@ impl FromStr for Target {
                 })
             }
             "file" => {
-                let host_remote = url
-                    .host_str()
-                    .is_some_and(|h| !h.is_empty() && !h.eq_ignore_ascii_case("localhost"));
-                if host_remote || url.path().starts_with("//") {
-                    return Err(parse_err(
-                        input,
-                        "remote/UNC file paths are refused (NTLM-relay risk)",
-                    ));
-                }
-                let path = url
-                    .to_file_path()
-                    .map_err(|()| parse_err(input, "invalid file path"))?;
-                if is_unc_or_remote(&path) {
-                    return Err(parse_err(
-                        input,
-                        "remote/UNC file paths are refused (NTLM-relay risk)",
-                    ));
-                }
+                let path = local_file_path(&url, input, "file")?;
                 let mode = url.query_pairs().find(|(k, _)| k == "mode").map_or(
                     FileMode::Present,
                     |(_, v)| match v.as_ref() {
@@ -828,24 +831,7 @@ impl FromStr for Target {
                 Ok(Self::File { path, mode })
             }
             "log" => {
-                let host_remote = url
-                    .host_str()
-                    .is_some_and(|h| !h.is_empty() && !h.eq_ignore_ascii_case("localhost"));
-                if host_remote || url.path().starts_with("//") {
-                    return Err(parse_err(
-                        input,
-                        "remote/UNC log paths are refused (NTLM-relay risk)",
-                    ));
-                }
-                let path = url
-                    .to_file_path()
-                    .map_err(|()| parse_err(input, "invalid log path"))?;
-                if is_unc_or_remote(&path) {
-                    return Err(parse_err(
-                        input,
-                        "remote/UNC log paths are refused (NTLM-relay risk)",
-                    ));
-                }
+                let path = local_file_path(&url, input, "log")?;
                 let mut substring: Option<String> = None;
                 let mut regex_pat: Option<String> = None;
                 for (k, v) in url.query_pairs() {

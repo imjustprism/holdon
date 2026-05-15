@@ -342,30 +342,31 @@ fn display_json_value(v: &serde_json::Value) -> String {
     }
 }
 
+fn truncate_ellipsis(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_owned();
+    }
+    let mut out: String = s.chars().take(max).collect();
+    out.push('…');
+    out
+}
+
 fn upstream_hint(headers: &HeaderMap) -> Option<String> {
-    let mut parts = Vec::new();
-    for name in SERVER_HINT_HEADERS {
-        if let Some(value) = headers.get(*name).and_then(|v| v.to_str().ok()) {
+    let parts: Vec<String> = SERVER_HINT_HEADERS
+        .iter()
+        .filter_map(|name| {
+            let value = headers.get(*name)?.to_str().ok()?;
             let cleaned = crate::util::sanitize_for_terminal(value);
             let trimmed = cleaned.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let bounded = if trimmed.chars().count() > SERVER_HINT_VALUE_MAX {
-                let mut t: String = trimmed.chars().take(SERVER_HINT_VALUE_MAX).collect();
-                t.push('…');
-                t
-            } else {
-                trimmed.to_owned()
-            };
-            parts.push(format!("{name}: {bounded}"));
-        }
-    }
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join(", "))
-    }
+            (!trimmed.is_empty()).then(|| {
+                format!(
+                    "{name}: {}",
+                    truncate_ellipsis(trimmed, SERVER_HINT_VALUE_MAX)
+                )
+            })
+        })
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(", "))
 }
 
 async fn read_body_snippet(resp: reqwest::Response) -> String {
@@ -376,26 +377,8 @@ async fn read_body_snippet(resp: reqwest::Response) -> String {
         return String::new();
     }
     let cleaned = crate::util::sanitize_for_terminal(&raw);
-    let mut compact = String::with_capacity(cleaned.len());
-    let mut prev_ws = false;
-    for ch in cleaned.chars() {
-        if ch.is_whitespace() {
-            if !prev_ws {
-                compact.push(' ');
-            }
-            prev_ws = true;
-        } else {
-            compact.push(ch);
-            prev_ws = false;
-        }
-    }
-    let compact = compact.trim();
-    if compact.chars().count() <= FAILURE_BODY_SNIPPET_BYTES {
-        return compact.to_owned();
-    }
-    let mut out: String = compact.chars().take(FAILURE_BODY_SNIPPET_BYTES).collect();
-    out.push('…');
-    out
+    let compact = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    truncate_ellipsis(&compact, FAILURE_BODY_SNIPPET_BYTES)
 }
 
 async fn read_body_capped(resp: reqwest::Response) -> reqwest::Result<String> {
