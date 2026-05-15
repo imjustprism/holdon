@@ -25,6 +25,10 @@ include = [
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[package.metadata."cargo-semver-checks".lints]
+enum_struct_variant_field_added = "allow"
+enum_variant_marked_non_exhaustive = "allow"
+
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.tar.gz"
 pkg-fmt = "tgz"
