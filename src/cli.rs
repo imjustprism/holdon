@@ -340,6 +340,15 @@ pub(crate) struct Args {
           help = "Minimum TLS version for HTTPS probes")]
     pub(crate) tls_min: TlsMinArg,
 
+    #[cfg(feature = "http")]
+    #[arg(
+        long = "http2-prior-knowledge",
+        env = "HOLDON_HTTP2_PRIOR_KNOWLEDGE",
+        action = clap::ArgAction::SetTrue,
+        help = "Speak HTTP/2 prior-knowledge (cleartext h2c). Disables HTTP/1 for all targets."
+    )]
+    pub(crate) http2_prior_knowledge: bool,
+
     #[arg(last = true)]
     pub(crate) exec: Vec<String>,
 }
