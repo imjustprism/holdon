@@ -131,8 +131,10 @@ pub enum Target {
     /// `?match` and `?regex` are mutually exclusive and require `?key`.
     #[non_exhaustive]
     Redis {
-        /// Full Redis connection URL with `key`, `match`, and `regex`
-        /// stripped so the driver does not reject them as unknown options.
+        /// Full Redis connection URL, including the `key`, `match`, and
+        /// `regex` query parameters if present. The checker strips those
+        /// keys from a clone of the URL before handing it to the driver, so
+        /// the driver does not reject them as unknown options.
         url: Url,
         /// Optional key to require, with optional value matcher.
         expect_key: Option<RedisKeyExpect>,
@@ -555,6 +557,9 @@ fn extract_redis_expect(input: &str, url: &Url) -> Result<Option<RedisKeyExpect>
                         "redis:// `?match` may appear at most once",
                     ));
                 }
+                if v.is_empty() {
+                    return Err(parse_err(input, "redis:// `?match` cannot be empty"));
+                }
                 needle = Some(v.into_owned());
             }
             "regex" => {
@@ -563,6 +568,9 @@ fn extract_redis_expect(input: &str, url: &Url) -> Result<Option<RedisKeyExpect>
                         input,
                         "redis:// `?regex` may appear at most once",
                     ));
+                }
+                if v.is_empty() {
+                    return Err(parse_err(input, "redis:// `?regex` cannot be empty"));
                 }
                 pattern = Some(v.into_owned());
             }
@@ -1323,6 +1331,12 @@ mod tests {
     #[test]
     fn redis_empty_key_rejected() {
         assert!("redis://cache?key=".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn redis_empty_match_or_regex_rejected() {
+        assert!("redis://cache?key=k&match=".parse::<Target>().is_err());
+        assert!("redis://cache?key=k&regex=".parse::<Target>().is_err());
     }
 
     #[test]
