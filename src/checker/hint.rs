@@ -174,6 +174,7 @@ mod mysql_codes {
     pub(super) const ER_HOST_IS_BLOCKED: u16 = 1129;
     pub(super) const ER_HOST_NOT_PRIVILEGED: u16 = 1130;
     pub(super) const ER_SERVER_SHUTDOWN: u16 = 1053;
+    pub(super) const ER_NOT_SUPPORTED_AUTH_MODE: u16 = 1251;
 }
 
 #[cfg(feature = "mysql")]
@@ -182,11 +183,13 @@ impl Hintable for mysql_async::Error {
         use mysql_async::IoError;
         use mysql_codes::{
             ER_ACCESS_DENIED, ER_BAD_DB, ER_DBACCESS_DENIED, ER_HOST_IS_BLOCKED,
-            ER_HOST_NOT_PRIVILEGED, ER_SERVER_SHUTDOWN,
+            ER_HOST_NOT_PRIVILEGED, ER_NOT_SUPPORTED_AUTH_MODE, ER_SERVER_SHUTDOWN,
         };
         match self {
             Self::Server(e) => match e.code {
-                ER_ACCESS_DENIED | ER_DBACCESS_DENIED => Some(hints::MYSQL_AUTH),
+                ER_ACCESS_DENIED | ER_DBACCESS_DENIED | ER_NOT_SUPPORTED_AUTH_MODE => {
+                    Some(hints::MYSQL_AUTH)
+                }
                 ER_BAD_DB => Some(hints::MYSQL_NO_DB),
                 ER_HOST_IS_BLOCKED | ER_HOST_NOT_PRIVILEGED => Some(hints::MYSQL_HOST_BLOCKED),
                 ER_SERVER_SHUTDOWN => Some(hints::MYSQL_NOT_READY),
@@ -236,6 +239,7 @@ mod mysql_hint_tests {
     fn access_denied_maps_to_auth_hint() {
         assert_eq!(server_err(1045).hint(), Some(hints::MYSQL_AUTH));
         assert_eq!(server_err(1044).hint(), Some(hints::MYSQL_AUTH));
+        assert_eq!(server_err(1251).hint(), Some(hints::MYSQL_AUTH));
     }
 
     #[test]
