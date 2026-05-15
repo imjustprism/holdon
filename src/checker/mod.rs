@@ -211,7 +211,6 @@ where
     }
 }
 
-#[allow(dead_code)]
 pub(crate) fn strip_query_keys(url: &url::Url, drop: &[&str]) -> url::Url {
     let kept: Vec<(String, String)> = url
         .query_pairs()
