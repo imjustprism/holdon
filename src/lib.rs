@@ -1,11 +1,7 @@
 #![doc = include_str!("../README.md")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
-#![deny(
-    missing_debug_implementations,
-    unused_must_use,
-    rust_2018_idioms
-)]
+#![deny(missing_debug_implementations, unused_must_use, rust_2018_idioms)]
 
 #[doc(hidden)]
 pub mod checker;
