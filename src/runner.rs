@@ -8,78 +8,114 @@ use crate::checker::AttemptCtx;
 use crate::diagnostic::CheckOutcome;
 use crate::target::Target;
 
-/// Whether the runner waits for targets to come up or to go down.
+/// Direction the runner moves towards readiness.
+///
+/// `Wait` is the default. The probe keeps retrying until the target reports
+/// ready, the overall deadline expires, or the consecutive-success threshold
+/// is reached.
+///
+/// `Reverse` flips the condition. The probe keeps retrying until the target
+/// reports NOT ready. Useful for teardown scripts that need to confirm a
+/// port has stopped listening or a service has finished draining before
+/// they move on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum Direction {
-    /// Wait for the target to be ready (default).
     #[default]
     Wait,
-    /// Wait for the target to be unreachable.
     Reverse,
 }
 
-/// Whether probes run side-by-side or one after the other.
+/// Whether targets are probed concurrently or one after another.
+///
+/// `Parallel` is the default. Every target runs in its own task and shares
+/// the overall deadline. Total wall-clock is bounded by the slowest target.
+///
+/// `Sequential` walks the input in order. Each target consumes whatever time
+/// remains under the overall deadline. Useful when a later target depends on
+/// the previous one already being up, or when you want predictable log
+/// output without interleaving.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum Schedule {
-    /// Probe every target concurrently (default).
     #[default]
     Parallel,
-    /// Probe targets one after another, in input order, sharing the deadline.
     Sequential,
 }
 
 /// Knobs controlling how a [`Runner`] schedules and bounds probes.
 ///
 /// Construct with [`RunnerConfig::default`] and chain the builder methods to
-/// override individual fields. All durations are best-effort: in-flight probes
-/// can overshoot the overall deadline by up to `attempt_timeout` because a
-/// running probe is not interrupted mid-attempt.
+/// override individual fields. Durations are best-effort. An in-flight probe
+/// can overshoot the overall deadline by up to `attempt_timeout` because
+/// running probes are not interrupted mid-attempt.
+///
+/// Retries use exponential backoff. Starting at `initial_interval`, each
+/// failed attempt doubles the wait, clamped to `max_interval`. With `jitter`
+/// enabled the actual wait is sampled uniformly from `[0, current]` to avoid
+/// thundering-herd lockstep across coordinated restarts.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct RunnerConfig {
-    /// Wall-clock budget for the entire run, measured from the moment
-    /// [`Runner::run`] is awaited (after `initial_delay`).
     pub overall_timeout: Duration,
-    /// First retry interval after a failed probe. Each subsequent failure
-    /// doubles the interval, capped at `max_interval`.
     pub initial_interval: Duration,
-    /// Upper bound on the exponential backoff between retries.
     pub max_interval: Duration,
-    /// Delay before the first probe fires.
     pub initial_delay: Duration,
-    /// Per-attempt timeout for one full probe (DNS, TCP, handshake, query).
     pub attempt_timeout: Duration,
-    /// Whether the readiness condition is normal or inverted.
     pub direction: Direction,
-    /// When `true`, only one attempt is made per target. No retry loop.
     pub once: bool,
-    /// Whether probes run in parallel or sequentially.
     pub schedule: Schedule,
-    /// Number of consecutive successful attempts required before a target is
-    /// considered satisfied. Default is 1. Higher values protect against
-    /// flapping services that briefly return ready then fail.
     pub success_threshold: u32,
-    /// When `true`, randomized jitter is applied to retry intervals to avoid
-    /// thundering-herd lockstep across parallel runs. Default is true.
     pub jitter: bool,
 }
 
 impl RunnerConfig {
     /// Default total wall-clock budget for a [`Runner::run`] call.
+    ///
+    /// Thirty seconds is enough for most container start-up readiness checks
+    /// without leaving CI jobs stuck on a misconfigured target forever.
     pub const DEFAULT_OVERALL_TIMEOUT: Duration = Duration::from_secs(30);
+
     /// Default first retry interval after a failed probe.
+    ///
+    /// One hundred milliseconds is fast enough to catch local services that
+    /// finish booting in under a second without hammering the target with
+    /// hundreds of probes per second.
     pub const DEFAULT_INITIAL_INTERVAL: Duration = Duration::from_millis(100);
-    /// Default upper bound on exponential backoff.
+
+    /// Default upper bound on the exponential backoff between retries.
+    ///
+    /// Two seconds keeps the runner responsive on slow services without
+    /// letting the wait grow into the tens of seconds where users start
+    /// thinking the tool has hung.
     pub const DEFAULT_MAX_INTERVAL: Duration = Duration::from_secs(2);
-    /// Default delay before the first probe (none).
+
+    /// Default delay applied before the very first probe fires.
+    ///
+    /// Zero by default. Useful values are short delays that match a known
+    /// minimum start-up cost on the target side, where probing earlier just
+    /// wastes attempts.
     pub const DEFAULT_INITIAL_DELAY: Duration = Duration::ZERO;
-    /// Default per-attempt timeout.
+
+    /// Default per-attempt timeout for one full probe.
+    ///
+    /// Bounds the time a single probe can spend on DNS, TCP, TLS, and the
+    /// protocol roundtrip. Five seconds is the rough median for healthy
+    /// services on local networks and cloud load balancers.
     pub const DEFAULT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(5);
-    /// Default consecutive-success threshold.
+
+    /// Default consecutive-success threshold before a target is satisfied.
+    ///
+    /// One means the first ready probe wins. Higher values protect against
+    /// flapping services that briefly report ready and then fall over again
+    /// during their warm-up phase.
     pub const DEFAULT_SUCCESS_THRESHOLD: u32 = 1;
-    /// Floor applied to interval and attempt-timeout to avoid 0-duration spin.
+
+    /// Floor applied to interval and attempt-timeout knobs.
+    ///
+    /// A zero-millisecond interval would spin the retry loop without giving
+    /// the OS a chance to schedule the next attempt. One millisecond is the
+    /// smallest value that still lets the runtime breathe.
     pub const MIN_INTERVAL: Duration = Duration::from_millis(1);
 }
 
@@ -101,38 +137,31 @@ impl Default for RunnerConfig {
 }
 
 impl RunnerConfig {
-    /// Sets [`RunnerConfig::overall_timeout`].
     #[must_use]
     pub const fn timeout(mut self, d: Duration) -> Self {
         self.overall_timeout = d;
         self
     }
-    /// Sets [`RunnerConfig::initial_interval`].
     #[must_use]
     pub const fn interval(mut self, d: Duration) -> Self {
         self.initial_interval = d;
         self
     }
-    /// Sets [`RunnerConfig::max_interval`].
     #[must_use]
     pub const fn max_interval(mut self, d: Duration) -> Self {
         self.max_interval = d;
         self
     }
-    /// Sets [`RunnerConfig::initial_delay`].
     #[must_use]
     pub const fn initial_delay(mut self, d: Duration) -> Self {
         self.initial_delay = d;
         self
     }
-    /// Sets [`RunnerConfig::attempt_timeout`].
     #[must_use]
     pub const fn attempt_timeout(mut self, d: Duration) -> Self {
         self.attempt_timeout = d;
         self
     }
-    /// Selects [`Direction::Reverse`] when `v` is true, otherwise
-    /// [`Direction::Wait`].
     #[must_use]
     pub const fn reverse(mut self, v: bool) -> Self {
         self.direction = if v {
@@ -142,14 +171,11 @@ impl RunnerConfig {
         };
         self
     }
-    /// Sets [`RunnerConfig::once`].
     #[must_use]
     pub const fn once(mut self, v: bool) -> Self {
         self.once = v;
         self
     }
-    /// Selects [`Schedule::Sequential`] when `v` is true, otherwise
-    /// [`Schedule::Parallel`].
     #[must_use]
     pub const fn sequential(mut self, v: bool) -> Self {
         self.schedule = if v {
@@ -159,13 +185,11 @@ impl RunnerConfig {
         };
         self
     }
-    /// Sets [`RunnerConfig::success_threshold`]. Clamps zero to one.
     #[must_use]
     pub const fn success_threshold(mut self, n: u32) -> Self {
         self.success_threshold = if n == 0 { 1 } else { n };
         self
     }
-    /// Sets [`RunnerConfig::jitter`].
     #[must_use]
     pub const fn jitter(mut self, v: bool) -> Self {
         self.jitter = v;
@@ -175,8 +199,13 @@ impl RunnerConfig {
 
 /// Drives a set of [`Target`] probes to completion under a single deadline.
 ///
-/// Construct with [`Runner::new`], then await [`Runner::run`]. The `Runner`
-/// is consumed by `run` so a single instance cannot be reused.
+/// Construct via [`Runner::new`] from a [`RunnerConfig`], then await
+/// [`Runner::run`] with the list of targets and an optional event sink. The
+/// `Runner` is consumed by `run` so a single instance cannot be reused.
+///
+/// The runner does not interrupt probes mid-attempt. The overall deadline
+/// applies between attempts. Worst case overshoot is one `attempt_timeout`
+/// past the deadline.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Runner {
@@ -184,53 +213,44 @@ pub struct Runner {
 }
 
 /// Per-target slice of a [`Report`].
+///
+/// Holds the original input index so callers can correlate results back to
+/// the order they passed in, even when parallel probes finished out of
+/// order. `satisfied` already factors in the direction and the
+/// success-threshold gate, so library code only needs to inspect this one
+/// field to decide whether the target is done.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct TargetReport {
-    /// Position of this target in the original input vector. Reports are
-    /// sorted by `idx` so output order matches input order even when probes
-    /// finish out of order.
     pub idx: usize,
-    /// The target as parsed. URL passwords are redacted by [`Target`]'s
-    /// `Display` and `Debug` impls.
     pub target: Target,
-    /// Number of probe attempts made before the loop terminated.
     pub attempts: u32,
-    /// Final probe outcome.
     pub final_outcome: CheckOutcome,
-    /// Whether the target met its readiness condition. Affected by
-    /// [`RunnerConfig::reverse`].
     pub satisfied: bool,
 }
 
 /// Aggregate outcome of a [`Runner::run`] call.
+///
+/// Contains one [`TargetReport`] per input target, sorted by input order,
+/// plus the total wall-clock time the run consumed. Use [`Report::all_ready`]
+/// for a quick boolean answer or [`Report::assert_all_ready`] when you want
+/// the run to surface a typed [`crate::Error::NotReady`] on partial success.
+///
+/// The report does not retain attempt-level events. Subscribe to the
+/// [`EventSink`] passed into [`Runner::run`] if you need per-attempt data.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Report {
-    /// Per-target results, sorted by [`TargetReport::idx`].
     pub results: Vec<TargetReport>,
-    /// Total wall-clock time of the run.
     pub elapsed: Duration,
 }
 
 impl Report {
-    /// Returns `true` when there is at least one target and every target
-    /// satisfied its readiness condition.
-    ///
-    /// An empty `Report` reports `false`. Vacuous-truth on an empty set is a
-    /// footgun in test harnesses where forgetting to populate targets should
-    /// not silently pass.
     #[must_use]
     pub fn all_ready(&self) -> bool {
         !self.results.is_empty() && self.results.iter().all(|r| r.satisfied)
     }
 
-    /// Returns `Ok(())` when [`Report::all_ready`] is true, otherwise an
-    /// error carrying the failed and total target counts.
-    ///
-    /// # Errors
-    /// Returns [`crate::Error::NotReady`] if the report contains zero targets
-    /// or if any target failed to satisfy its readiness condition.
     pub fn assert_all_ready(&self) -> crate::Result<()> {
         if self.all_ready() {
             Ok(())
@@ -247,64 +267,47 @@ impl Report {
 /// Event emitted by [`Runner::run`] over the optional [`EventSink`].
 ///
 /// Workers emit events from spawned tasks, so consumers must drain the
-/// receiver concurrently with `run` to avoid back-pressure.
+/// receiver concurrently with `run` to avoid back-pressure stalling the
+/// runner. The default channel is unbounded for now, see [`EventSink`].
+///
+/// `Attempt` fires after every probe attempt with the latency and immediate
+/// ready bit. `Finished` fires once per target when its retry loop ends,
+/// either because the target satisfied its readiness condition or because
+/// the deadline elapsed.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum Event {
-    /// Fires after every probe attempt with the latency and immediate result.
     Attempt {
-        /// Position of the target in the original input.
         idx: usize,
-        /// The target probed.
         target: Target,
-        /// 1-based attempt counter.
         attempt: u32,
-        /// Wall time the attempt took.
         latency: Duration,
-        /// Whether this attempt's outcome was ready (pre-`reverse` semantics).
         ready: bool,
     },
-    /// Fires once per target when the retry loop terminates.
     Finished {
-        /// Position of the target in the original input.
         idx: usize,
-        /// The target probed.
         target: Target,
-        /// Total number of attempts made.
         attempts: u32,
-        /// Final probe outcome.
         outcome: CheckOutcome,
-        /// Whether the readiness condition was satisfied (after applying
-        /// [`RunnerConfig::reverse`]).
         satisfied: bool,
     },
 }
 
 /// Channel sender used to receive [`Event`]s during a run.
 ///
-/// Currently an unbounded sender. Consumers that may stall (a slow terminal,
-/// a piped JSON consumer) should drain promptly to avoid memory growth
-/// proportional to attempt rate × target count.
+/// This is an unbounded sender. Slow consumers (a stalled terminal, a piped
+/// JSON consumer that blocks on flush) will grow memory proportional to
+/// attempt rate times target count. Drain promptly. A future major release
+/// is expected to swap this for a bounded channel with a documented drop
+/// policy.
 pub type EventSink = UnboundedSender<Event>;
 
 impl Runner {
-    /// Builds a [`Runner`] from a [`RunnerConfig`].
     #[must_use]
     pub const fn new(cfg: RunnerConfig) -> Self {
         Self { cfg }
     }
 
-    /// Probes every target until each is satisfied or the overall deadline
-    /// expires, then returns a [`Report`].
-    ///
-    /// In parallel mode (default), all targets are probed concurrently in
-    /// independent tasks and share the overall deadline. In sequential mode,
-    /// targets are probed one after another in input order, each consuming
-    /// whatever budget remains.
-    ///
-    /// Pass `Some(sink)` to receive [`Event`]s as probes happen. The future is
-    /// cancel-safe: dropping it aborts all in-flight probes and releases their
-    /// sockets.
     #[tracing::instrument(skip_all, fields(targets = targets.len(), schedule = ?self.cfg.schedule))]
     pub async fn run(self, targets: Vec<Target>, sink: Option<EventSink>) -> Report {
         let started = Instant::now();

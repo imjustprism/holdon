@@ -19,11 +19,6 @@ const HOSTNAME_MAX_LEN: usize = 253;
 pub struct Hostname(Box<str>);
 
 impl Hostname {
-    /// Builds a [`Hostname`], validating the input.
-    ///
-    /// # Errors
-    /// Returns [`Error::Parse`] if the input is empty, too long, or contains
-    /// control bytes.
     pub fn new(s: impl Into<Box<str>>) -> Result<Self> {
         let s = s.into();
         if s.is_empty() {
@@ -38,7 +33,6 @@ impl Hostname {
         Ok(Self(s))
     }
 
-    /// Returns the validated hostname as a string slice.
     #[must_use]
     pub const fn as_str(&self) -> &str {
         &self.0
@@ -78,197 +72,81 @@ impl AsRef<str> for Hostname {
 #[derive(Clone)]
 #[non_exhaustive]
 pub enum Target {
-    /// Plain TCP connect to `host:port`.
     Tcp {
-        /// Hostname or IP literal (without brackets for IPv6).
         host: Hostname,
-        /// TCP port.
         port: u16,
     },
-    /// HTTP(S) request, ready when status falls in `expect`.
     Http {
-        /// Fully-parsed URL.
         url: Url,
-        /// Status code range that counts as ready. Defaults to 2xx.
         expect: StatusRange,
     },
-    /// Hostname resolution check, no socket opened.
     Dns {
-        /// Hostname to resolve.
         host: Hostname,
     },
-    /// Filesystem existence check.
     File {
-        /// Absolute path. UNC and `\\?\` paths are refused at parse time.
         path: PathBuf,
-        /// Whether to wait for the path to exist or to disappear.
         mode: FileMode,
     },
-    /// Postgres connect plus `SELECT 1`.
-    ///
-    /// Optional `?table=NAME` runs a parameterized
-    /// `SELECT 1 FROM information_schema.tables WHERE table_name = $1 AND
-    /// table_schema = ANY (current_schemas(false))` after the readiness
-    /// query, so the check is scoped to the session's current search path
-    /// rather than every schema in the database. The table name is validated
-    /// at parse time (`[A-Za-z_][A-Za-z0-9_]{0,62}`) before being bound as a
-    /// parameter.
     #[non_exhaustive]
     Postgres {
-        /// Full Postgres connection URL, including the `table` query
-        /// parameter if present. The checker strips `table` from a clone
-        /// before passing the connection string to libpq, so the driver
-        /// does not reject it as an unknown option.
         url: Url,
-        /// Optional table name to verify exists.
         expect_table: Option<String>,
     },
-    /// Redis connect plus `PING`.
-    ///
-    /// Optional `?key=NAME` runs `GET NAME` after the `PING`. The probe fails
-    /// if the key does not exist. With `?match=NEEDLE` or `?regex=PATTERN`,
-    /// the returned value must contain the substring or match the regex.
-    /// `?match` and `?regex` are mutually exclusive and require `?key`.
     #[non_exhaustive]
     Redis {
-        /// Full Redis connection URL, including the `key`, `match`, and
-        /// `regex` query parameters if present. The checker strips those
-        /// keys from a clone of the URL before handing it to the driver, so
-        /// the driver does not reject them as unknown options.
         url: Url,
-        /// Optional key to require, with optional value matcher.
         expect_key: Option<RedisKeyExpect>,
     },
-    /// `MySQL` / `MariaDB` connect + `SELECT 1`. TLS by default (rustls), opt
-    /// out with `?ssl-mode=disable`. Behind the `mysql` feature.
-    ///
-    /// Optional `?table=NAME` runs a parameterized
-    /// `SELECT 1 FROM information_schema.tables WHERE table_name = ? AND
-    /// table_schema = DATABASE()` after the readiness query, scoping the
-    /// check to the database named in the URL rather than every accessible
-    /// database on the server.
     #[non_exhaustive]
     Mysql {
-        /// Full `MySQL` connection URL, including the `table` query parameter
-        /// if present. The checker strips `table` from a clone before
-        /// passing the connection string to `mysql_async`.
         url: Url,
-        /// Optional table name to verify exists.
         expect_table: Option<String>,
     },
-    /// Run an external command, ready iff it exits 0.
-    ///
-    /// Parsed from `exec://<program>[?arg=...&arg=...]`. The program may be a
-    /// bare executable name (resolved via the OS PATH), a relative path
-    /// (refused by default, opt-in via `HOLDON_ALLOW_RELATIVE_EXEC=1`), or an absolute path
-    /// (`exec:///usr/local/bin/pg_isready`). Arguments are passed via repeated
-    /// `arg=` query parameters and are never interpreted by a shell.
-    ///
-    /// `exec://` runs whatever the user told it to. Treat target strings as
-    /// code at the invocation site.
     Exec {
-        /// Program path or name. Passed verbatim to
-        /// [`tokio::process::Command::new`].
         program: PathBuf,
-        /// Arguments, in order. Never split or shell-expanded.
         args: Vec<String>,
     },
-    /// gRPC `grpc.health.v1.Health/Check` against the target endpoint.
-    ///
-    /// Parsed from `grpc://host:port[/Service]` (plaintext) or
-    /// `grpcs://host:port[/Service]` (TLS via rustls). Path component selects
-    /// the gRPC service name to check. Empty path means overall server health.
-    /// Behind the `grpc` feature.
     Grpc {
-        /// Endpoint URL (`grpc://` or `grpcs://`).
         url: Url,
-        /// gRPC service name passed in `HealthCheckRequest.service`. Empty
-        /// string means "overall server" per the protocol.
         service: String,
     },
-    /// Wait for a substring or regex to appear in a local log file.
-    ///
-    /// Parsed from `log:///absolute/path?match=needle` or
-    /// `log:///absolute/path?regex=pattern`. Reads up to the last 1 MiB of
-    /// the file on each attempt and applies the matcher.
     Log {
-        /// Absolute file path. UNC paths are refused at parse time.
         path: PathBuf,
-        /// Matcher to apply against the file content.
         matcher: LogMatcher,
     },
-    /// `InfluxDB` `/ping` probe.
-    ///
-    /// Parsed from `influxdb://host:8086` (plaintext) or
-    /// `influxdbs://host:8086` (TLS via rustls). Optional
-    /// `?expect-version=1|2|3` requires the `X-Influxdb-Version` (v1, v2)
-    /// or `X-Influxdb-Build` (v3) response header to identify the major.
-    /// Optional `?token=...` sends `Authorization: Token ...` for v3 OSS
-    /// servers that require auth on `/ping`. Behind the `influxdb` feature.
     Influxdb {
-        /// Full `InfluxDB` URL.
         url: Url,
     },
-    /// `MongoDB` connect plus admin `ping` command.
-    ///
-    /// Parsed from `mongodb://[user:pass@]host[:port][/db][?options]` or
-    /// `mongodb+srv://[user:pass@]host[/db][?options]` for DNS SRV
-    /// discovery. TLS is negotiated via the URL `?tls=true` option per the
-    /// `MongoDB` connection string spec. Behind the `mongodb` feature.
     Mongodb {
-        /// Full `MongoDB` connection URL.
         url: Url,
     },
-    /// `RabbitMQ` AMQP 0-9-1 connection probe.
-    ///
-    /// Parsed from `amqp://[user:pass@]host[:port][/vhost]` (plaintext) or
-    /// `amqps://[user:pass@]host[:port][/vhost]` (TLS via rustls).
-    /// Optional `?queue=NAME` performs a passive queue declare, failing if
-    /// the queue is absent. Optional `?exchange=NAME` performs a passive
-    /// exchange declare. Behind the `rabbitmq` feature.
     Rabbitmq {
-        /// Full AMQP connection URL.
         url: Url,
-        /// Queue to passively declare, if any.
         queue: Option<String>,
-        /// Exchange to passively declare, if any.
         exchange: Option<String>,
     },
-    /// `Kafka` broker metadata probe.
-    ///
-    /// Parsed from `kafka://host:9092` (plaintext) or `kafkas://host:9092`
-    /// (TLS via rustls). Fetches Metadata API and optionally verifies a
-    /// topic exists via `?topic=NAME` and has at least N partitions via
-    /// `?expect-partitions=N`. Behind the `kafka` feature.
     Kafka {
-        /// Full Kafka URL.
         url: Url,
-        /// Topic to verify exists in broker metadata, if any.
         topic: Option<String>,
-        /// Minimum partition count required for the named topic.
         min_partitions: Option<u32>,
     },
-    /// `Temporal` server gRPC `Health/Check` probe.
-    ///
-    /// Parsed from `temporal://host:7233` (plaintext) or
-    /// `temporals://host:7233` (TLS via rustls). Targets the
-    /// `temporal.api.workflowservice.v1.WorkflowService` health endpoint
-    /// per the gRPC health spec. Behind the `temporal` feature.
     Temporal {
-        /// Full Temporal endpoint URL.
         url: Url,
     },
 }
 
 /// Matcher applied to log file content by [`Target::Log`].
+///
+/// The probe reads the trailing window of the file and tests this matcher
+/// against the bytes. `Substring` does a literal byte search. `Regex` uses
+/// the parse-time-compiled `regex_lite` pattern.
+///
+/// The enum is `#[non_exhaustive]`. New matcher kinds can land without
+/// breaking external pattern matches that already use a wildcard arm.
 #[derive(Clone)]
 #[non_exhaustive]
 pub enum LogMatcher {
-    /// Literal substring search. Matches when the bytes appear anywhere in
-    /// the read window.
     Substring(String),
-    /// Compiled regular expression. Matches when the regex hits anywhere in
-    /// the read window.
     Regex(std::sync::Arc<regex_lite::Regex>),
 }
 
@@ -281,28 +159,37 @@ impl fmt::Debug for LogMatcher {
     }
 }
 
-/// Redis key existence + optional value-matcher assertion.
+/// Redis key existence assertion with an optional value matcher.
 ///
-/// Built from `?key=NAME` plus optional `?match=NEEDLE` or `?regex=PATTERN`.
-/// `match` and `regex` are mutually exclusive and require `key`.
+/// Built from `?key=NAME` on a `redis://` target, optionally combined with
+/// either `?match=NEEDLE` for a substring check or `?regex=PATTERN` for a
+/// regex check. The two value matchers are mutually exclusive and both
+/// require the `key` parameter.
+///
+/// At probe time the checker runs `GET key`. A missing key fails the probe
+/// regardless of matcher. If a matcher is set, the returned value is
+/// decoded as UTF-8 (lossily) and tested against the substring or regex.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct RedisKeyExpect {
-    /// Key to fetch via `GET`. Must be non-empty.
     pub key: String,
-    /// Optional matcher applied to the returned value as UTF-8. `None`
-    /// requires only that the key exists.
     pub matcher: Option<LogMatcher>,
 }
 
-/// Whether a [`Target::File`] check waits for a path to exist or to disappear.
+/// Whether a [`Target::File`] check waits for a path to exist or to vanish.
+///
+/// `Present` is the default. The probe reports ready when the path exists
+/// and is reachable via `symlink_metadata`. Useful for waiting on init
+/// scripts that drop a file once a service is up.
+///
+/// `Absent` is selected via `?mode=absent` on the URL. The probe reports
+/// ready when the path is gone. Useful for teardown checks that wait for a
+/// pid file or lock file to disappear before continuing.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FileMode {
-    /// Wait until the path exists. Default.
     #[default]
     Present,
-    /// Wait until the path no longer exists. Selected via `?mode=absent`.
     Absent,
 }
 
@@ -321,7 +208,6 @@ const HTTP_2XX_LO: u16 = 200;
 const HTTP_2XX_HI: u16 = 299;
 
 impl StatusRange {
-    /// Returns the default `200..=299` range.
     #[must_use]
     pub const fn ok_2xx() -> Self {
         Self {
@@ -330,7 +216,6 @@ impl StatusRange {
         }
     }
 
-    /// Builds a custom inclusive range. Caller must pass `lo <= hi`.
     #[must_use]
     pub const fn new(lo: u16, hi: u16) -> Self {
         Self {
@@ -339,7 +224,6 @@ impl StatusRange {
         }
     }
 
-    /// Returns `true` if `status` falls inside the inclusive range.
     #[must_use]
     pub const fn contains(&self, status: u16) -> bool {
         status >= self.lo && status <= self.hi

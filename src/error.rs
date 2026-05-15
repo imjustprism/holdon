@@ -2,48 +2,44 @@ use std::io;
 
 use thiserror::Error;
 
-/// Result alias defaulting to [`enum@Error`].
+/// Shorthand for a `Result` whose error defaults to the crate's [`enum@Error`].
+///
+/// Library users that already track their own error type can pin the second
+/// parameter explicitly. The default reduces boilerplate inside the crate
+/// where every fallible helper returns the same [`enum@Error`].
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Errors returned by the public API.
+///
+/// Every variant carries enough context to render a useful one-line failure
+/// without consulting the source. The `Parse` variant preserves the original
+/// input so error messages can quote the offending CLI argument. Network and
+/// HTTP transport errors round-trip through their upstream `From` impls so
+/// downstream code can downcast when it needs the original.
+///
+/// The enum is `#[non_exhaustive]`. Future variants land at the end of the
+/// list to keep the existing `From` impls and pattern matches working.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// Target string was recognizable in shape but malformed.
     #[error("invalid target `{input}`: {reason}")]
-    Parse {
-        /// Original input string.
-        input: String,
-        /// Reason the input was rejected.
-        reason: String,
-    },
+    Parse { input: String, reason: String },
 
-    /// One or more targets failed to satisfy their readiness condition.
     #[error("{failed} of {total} targets failed to become ready")]
-    NotReady {
-        /// Number of targets that failed.
-        failed: usize,
-        /// Total number of targets in the report.
-        total: usize,
-    },
+    NotReady { failed: usize, total: usize },
 
-    /// Target shorthand carried no port and a port was required.
     #[error("missing port in `{0}`")]
     MissingPort(String),
 
-    /// URL parsed cleanly but its scheme is not supported by this build.
     #[error("unsupported scheme `{0}`")]
     UnsupportedScheme(String),
 
-    /// Underlying I/O failure (DNS, socket, filesystem).
     #[error("io: {0}")]
     Io(#[from] io::Error),
 
-    /// Malformed URL rejected by the [`url`] crate.
     #[error("invalid url: {0}")]
     Url(#[from] url::ParseError),
 
-    /// Wraps a [`reqwest`] failure. Present only with the `http` feature.
     #[cfg(feature = "http")]
     #[error("http: {0}")]
     Http(#[from] reqwest::Error),

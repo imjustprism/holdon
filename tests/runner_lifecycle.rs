@@ -19,8 +19,6 @@ use tokio::time::Instant;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn parallel_finishes_in_under_max_attempt_time() {
-    // Three closed ports in parallel should finish in roughly attempt_timeout,
-    // not 3 * attempt_timeout. Verifies parallelism is actually working.
     let p1 = free_port().await;
     let p2 = free_port().await;
     let p3 = free_port().await;
@@ -63,8 +61,6 @@ async fn sequential_runs_in_order() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn report_results_sorted_by_input_idx() {
-    // Even though parallel workers finish out of order, the report stays sorted
-    // by input index.
     let (_l1, slow_port) = bind_ephemeral().await;
     let (_l2, fast_port) = bind_ephemeral().await;
     let cfg = RunnerConfig::default()
@@ -81,8 +77,6 @@ async fn report_results_sorted_by_input_idx() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn dropping_run_future_cancels_in_flight_probes() {
-    // Build a long-running probe (closed port + long attempt timeout), then
-    // drop the future before it completes. Verify it returns control quickly.
     let port = free_port().await;
     let cfg = RunnerConfig::default()
         .timeout(Duration::from_secs(60))
@@ -155,7 +149,6 @@ async fn deadline_overall_timeout_respected() {
     let report = Runner::new(cfg).run(vec![target], None).await;
     let elapsed = start.elapsed();
     assert!(!report.all_ready());
-    // Allow up to attempt_timeout overshoot.
     assert!(elapsed < Duration::from_millis(900), "elapsed={elapsed:?}");
 }
 

@@ -27,7 +27,6 @@ fn hostname_rejects_empty_and_too_long() {
 
 #[test]
 fn hostname_via_target_parse_propagates_validation() {
-    // Embedded NUL in the host portion of a target string should fail.
     let bad = "host\x00name:5432";
     assert!(bad.parse::<Target>().is_err());
 }

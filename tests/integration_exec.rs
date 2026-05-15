@@ -11,8 +11,6 @@ use common::{quick_cfg, run};
 use holdon::Target;
 use holdon::diagnostic::{StageKind, StageResult};
 
-/// On Windows we use `cmd /c exit <code>` for portable exit-status control.
-/// On Unix we use `/bin/sh -c 'exit <code>'`.
 #[cfg(windows)]
 fn exit_target(code: i32) -> Target {
     format!("exec://cmd?arg=/c&arg=exit%20{code}")
@@ -28,7 +26,6 @@ fn exit_target(code: i32) -> Target {
 
 #[cfg(windows)]
 fn stderr_target(line: &str) -> Target {
-    // `cmd /c echo X 1>&2 & exit 1`
     let q = percent_encode_arg(&format!("echo {line} 1>&2 & exit 1"));
     format!("exec://cmd?arg=/c&arg={q}").parse().unwrap()
 }
@@ -102,7 +99,6 @@ async fn exec_program_not_found_has_helpful_hint() {
 
 #[tokio::test]
 async fn exec_stderr_ansi_escape_is_sanitized() {
-    // Embed an ESC byte; the message must not contain a raw \x1b.
     #[cfg(windows)]
     let t: Target = "exec://cmd?arg=/c&arg=echo%20%1B%5B31mRED%1B%5B0m%201%3E%262%20%26%20exit%201"
         .parse()

@@ -37,10 +37,17 @@ mod temporal;
 pub(crate) use hint::{Hintable, hints};
 
 /// Per-attempt context passed from [`crate::Runner`] down to each checker.
+///
+/// Carries the wall-clock budget the runner is willing to spend on a single
+/// probe attempt. Checkers should honour this value when wiring driver
+/// timeouts (connect, server selection, query) so a slow target cannot stall
+/// the overall deadline.
+///
+/// The struct is `#[non_exhaustive]`. Future per-attempt knobs can land
+/// without breaking downstream pattern matches.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct AttemptCtx {
-    /// Wall-clock budget for one probe attempt.
     pub attempt_timeout: Duration,
 }
 
@@ -53,14 +60,6 @@ impl Default for AttemptCtx {
 }
 
 impl Target {
-    /// Runs one probe attempt against this target.
-    ///
-    /// Dispatches to the protocol-specific checker (TCP, HTTP, Postgres, ...)
-    /// based on the variant. Returns a [`CheckOutcome`] capturing every stage,
-    /// the total wall time, and the final pass/fail status. Errors from
-    /// upstream libraries are formatted via [`crate::util::format_error_chain`]
-    /// which sanitizes control bytes, and any URL password is redacted before
-    /// reaching the result.
     pub async fn probe(&self, ctx: AttemptCtx) -> CheckOutcome {
         let start = Instant::now();
         let stages = match self {
