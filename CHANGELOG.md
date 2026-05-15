@@ -8,25 +8,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- HTTP mutual TLS via `--client-cert PATH` + `--client-key PATH` (PEM).
-  Both env-bindable as `HOLDON_CLIENT_CERT` / `HOLDON_CLIENT_KEY`.
-- HTTP response header assertions via `--expect-header NAME=REGEX`,
-  repeatable. Failure hints: `HTTP_HEADER_MISSING` (absent),
-  `HTTP_HEADER_MISMATCH` (regex did not match), `HTTP_HEADER_ENCODING`
-  (non-ASCII bytes in the header value).
-- `postgres://...?table=NAME` and `mysql://...?table=NAME` verify a table
-  exists via a parameterized `information_schema.tables` lookup after the
-  readiness query, scoped to the session search path (Postgres) or the
-  database in the URL (MySQL). Names validated at parse time
-  (`[A-Za-z_][A-Za-z0-9_]{0,62}`). Stripped from the connection string
-  before reaching the driver so libpq does not reject it as unknown.
-- Hints `PG_TABLE_MISSING`, `MYSQL_TABLE_MISSING`.
+- `redis://...?key=NAME` runs `GET NAME` after `PING`. Probe fails if the
+  key is absent. Optional `?match=NEEDLE` or `?regex=PATTERN` further
+  asserts the value contains the substring or matches the regex. Mutually
+  exclusive, both require `?key`.
+- Hints `REDIS_KEY_MISSING` and `REDIS_VALUE_MISMATCH`.
+- Public `RedisKeyExpect` re-exported from the crate root.
 
 ### Changed
 
-- `Target::Postgres` and `Target::Mysql` variants are now
-  `#[non_exhaustive]` and gain `expect_table: Option<String>`. Pattern
-  matches on the prior `{ url }` shape need `{ url, .. }`.
+- `Target::Redis` variant is now `#[non_exhaustive]` and gains
+  `expect_key: Option<RedisKeyExpect>`. Pattern matches on the prior
+  `{ url }` shape need `{ url, .. }`.
 
 ## [0.2.1] - 2026-05-12
 

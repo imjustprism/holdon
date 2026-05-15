@@ -78,7 +78,7 @@ impl Target {
             #[cfg(not(feature = "postgres"))]
             Self::Postgres { .. } => disabled_stage(StageKind::Postgres, "postgres"),
             #[cfg(feature = "redis")]
-            Self::Redis { url } => redis::probe(url, ctx).await,
+            Self::Redis { url, expect_key } => redis::probe(url, expect_key.as_ref(), ctx).await,
             #[cfg(not(feature = "redis"))]
             Self::Redis { .. } => disabled_stage(StageKind::Redis, "redis"),
             #[cfg(feature = "mysql")]
