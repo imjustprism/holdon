@@ -75,6 +75,7 @@ pub enum StageKind {
     Kafka,
     Temporal,
     Docker,
+    K8s,
 }
 
 /// Outcome of a single [`Stage`].
@@ -139,6 +140,7 @@ impl StageKind {
             Self::Kafka => ("kafka", "Kafka metadata"),
             Self::Temporal => ("temporal", "Temporal health"),
             Self::Docker => ("docker", "Docker container"),
+            Self::K8s => ("k8s", "Kubernetes resource"),
         }
     }
 

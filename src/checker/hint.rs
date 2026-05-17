@@ -114,6 +114,16 @@ pub(crate) mod hints {
     pub(crate) const DOCKER_NO_HEALTHCHECK: &str = "container has no HEALTHCHECK defined, drop ?healthy=true or add a HEALTHCHECK to the image";
     pub(crate) const DOCKER_UNHEALTHY: &str = "container reported unhealthy, inspect the most recent healthcheck logs with `docker inspect`";
     pub(crate) const DOCKER_PROTOCOL: &str = "unexpected response from the Docker engine API, ensure DOCKER_HOST points at a real Docker engine";
+    pub(crate) const K8S_NO_CONFIG: &str = "could not resolve a Kubernetes API server, run inside a pod with a service account or set KUBE_SERVER and KUBE_TOKEN";
+    pub(crate) const K8S_API_UNREACHABLE: &str =
+        "could not reach the Kubernetes API server, check connectivity and TLS";
+    pub(crate) const K8S_AUTH: &str = "Kubernetes API rejected the bearer token, the service account or KUBE_TOKEN may be expired or lack RBAC permissions";
+    pub(crate) const K8S_NOT_FOUND: &str =
+        "resource does not exist in this namespace yet, the controller may not have created it";
+    pub(crate) const K8S_NOT_READY: &str =
+        "resource exists but is not yet reporting Ready/Complete";
+    pub(crate) const K8S_PROTOCOL: &str =
+        "unexpected response shape from the Kubernetes API server";
 }
 
 impl Hintable for std::io::Error {

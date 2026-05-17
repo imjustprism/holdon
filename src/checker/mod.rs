@@ -19,6 +19,8 @@ mod hint;
 pub mod http;
 #[cfg(feature = "influxdb")]
 mod influxdb;
+#[cfg(feature = "k8s")]
+mod k8s;
 #[cfg(feature = "kafka")]
 mod kafka;
 mod log;
@@ -126,6 +128,14 @@ impl Target {
             Self::Docker { name, expect } => docker::probe(name, expect, ctx).await,
             #[cfg(not(feature = "docker"))]
             Self::Docker { .. } => disabled_stage(StageKind::Docker, "docker"),
+            #[cfg(feature = "k8s")]
+            Self::K8s {
+                kind,
+                namespace,
+                name,
+            } => k8s::probe(*kind, namespace, name, ctx).await,
+            #[cfg(not(feature = "k8s"))]
+            Self::K8s { .. } => disabled_stage(StageKind::K8s, "k8s"),
         };
         let ok = stages
             .last()
