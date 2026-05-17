@@ -38,12 +38,19 @@ impl Printer {
         }
     }
 
-    pub(crate) fn banner(&mut self, targets: &[Target], exec: Option<&[String]>) {
+    pub(crate) fn banner(
+        &mut self,
+        targets: &[Target],
+        names: &[Option<String>],
+        exec: Option<&[String]>,
+    ) {
         match self {
-            Self::Plain(p) => p.banner(targets, exec),
-            Self::Quiet => {}
+            Self::Plain(p) => p.banner(targets, names, exec),
+            Self::Quiet => {
+                let _ = names;
+            }
             #[cfg(feature = "json-output")]
-            Self::Json(j) => j.banner(targets),
+            Self::Json(j) => j.banner(targets, names),
         }
     }
 

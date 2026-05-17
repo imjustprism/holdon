@@ -85,7 +85,26 @@ async fn run(args: Args) -> Result<ExitStatus> {
     let config_data = config::load(args.config.as_deref())?;
 
     let mut raw_targets = collect_target_inputs(&args.targets)?;
+    let cli_count = raw_targets.len();
     append_config_targets(&mut raw_targets, &config_data.targets)?;
+    let mut names: Vec<Option<String>> = std::iter::repeat_n(None, raw_targets.len()).collect();
+    // config_data.names lines up with config_data.targets entries (the
+    // legacy targets array plus any [[check]] blocks, in file order).
+    // Splice it in starting after the positional CLI targets.
+    let config_target_count = raw_targets.len() - cli_count;
+    // parse_durations guarantees config_data.names.len() == config_data.targets.len(),
+    // so once we know there are config-provided targets we can splice straight in.
+    if config_target_count > 0 {
+        for (i, n) in config_data
+            .names
+            .iter()
+            .take(config_target_count)
+            .cloned()
+            .enumerate()
+        {
+            names[cli_count + i] = n;
+        }
+    }
     let mut targets: Vec<Target> = raw_targets
         .iter()
         .map(|s| {
@@ -220,7 +239,7 @@ async fn run(args: Args) -> Result<ExitStatus> {
     } else {
         Some(&args.exec)
     };
-    printer.banner(&targets, exec_slice);
+    printer.banner(&targets, &names, exec_slice);
 
     install_panic_hook();
     init_tracing(args.verbose);
