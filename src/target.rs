@@ -986,8 +986,16 @@ fn parse_err(input: &str, reason: &str) -> Error {
 /// `Error::Parse` and `Error::MissingPort` both quote the offending input in
 /// their `Display` output, so any leak there ends up in stderr, logs, and
 /// any tracing span that captures the error chain.
+///
+/// The output also has every C0, DEL, and C1 control character replaced with
+/// U+FFFD so a hostile target string cannot smuggle ANSI escape sequences
+/// through the "invalid target ..." fragment that callers print verbatim.
 fn scrub_target_input(input: &str) -> String {
-    scrub_query_secrets(&crate::util::redact_userinfo(input))
+    let scrubbed = scrub_query_secrets(&crate::util::redact_userinfo(input));
+    scrubbed
+        .chars()
+        .map(|c| if c.is_control() { '\u{fffd}' } else { c })
+        .collect()
 }
 
 fn scrub_query_secrets(input: &str) -> String {
@@ -1061,6 +1069,18 @@ mod tests {
         // terminals interpret them like ESC[ when echoed.
         assert!(Hostname::new("evil\u{0085}host").is_err());
         assert!(Hostname::new("evil\u{009b}host").is_err());
+    }
+
+    #[test]
+    fn parse_error_input_strips_control_chars() {
+        // The bare-host parser rejects an empty hostname before any
+        // control check could be reached, but feeding a control through a
+        // url-shaped target with a non-empty host name triggers the host
+        // validator, whose error wraps the user input via parse_err.
+        let err = "evil\u{009b}host:80".parse::<Target>().unwrap_err();
+        let msg = err.to_string();
+        assert!(!msg.contains('\u{009b}'), "raw C1 still in: {msg}");
+        assert!(msg.contains('\u{fffd}'), "expected replacement char in: {msg}");
     }
 
     #[test]
