@@ -67,6 +67,29 @@ main() {
     curl -fsSL -o "${tmp}/${archive}" "${base}/${archive}"
     curl -fsSL -o "${tmp}/SHA256SUMS" "${base}/SHA256SUMS"
 
+    # SHA256SUMS.sig and SHA256SUMS.pem come from cosign sign-blob in
+    # release.yml. If the user has cosign installed, verify the bundle
+    # before trusting any hash in the file. Without cosign we still get
+    # TLS to github.com but no cryptographic proof the file matches a
+    # release that ran through the published workflow.
+    if command -v cosign >/dev/null 2>&1; then
+        curl -fsSL -o "${tmp}/SHA256SUMS.sig" "${base}/SHA256SUMS.sig"
+        curl -fsSL -o "${tmp}/SHA256SUMS.pem" "${base}/SHA256SUMS.pem"
+        if ! cosign_out="$(cosign verify-blob \
+            --certificate "${tmp}/SHA256SUMS.pem" \
+            --signature "${tmp}/SHA256SUMS.sig" \
+            --certificate-identity-regexp "https://github\\.com/${REPO}/\\.github/workflows/release\\.yml@refs/tags/v.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "${tmp}/SHA256SUMS" 2>&1)"; then
+            echo "install: cosign signature verification failed for SHA256SUMS" >&2
+            echo "$cosign_out" >&2
+            exit 1
+        fi
+        echo "install: SHA256SUMS cosign signature verified"
+    else
+        echo "install: cosign not found, skipping signature verification (install cosign for stronger supply-chain checks)" >&2
+    fi
+
     expected="$(grep " ${archive}\$" "${tmp}/SHA256SUMS" | awk '{print $1}')"
     [ -n "$expected" ] || { echo "install: ${archive} missing from SHA256SUMS" >&2; exit 1; }
     verify_checksum "${tmp}/${archive}" "$expected"
