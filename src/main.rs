@@ -92,9 +92,16 @@ async fn run(args: Args) -> Result<ExitStatus> {
     // legacy targets array plus any [[check]] blocks, in file order).
     // Splice it in starting after the positional CLI targets.
     let config_target_count = raw_targets.len() - cli_count;
-    if config_target_count > 0 && !config_data.names.is_empty() {
-        let from_config = config_data.names.iter().take(config_target_count).cloned();
-        for (i, n) in from_config.enumerate() {
+    // parse_durations guarantees config_data.names.len() == config_data.targets.len(),
+    // so once we know there are config-provided targets we can splice straight in.
+    if config_target_count > 0 {
+        for (i, n) in config_data
+            .names
+            .iter()
+            .take(config_target_count)
+            .cloned()
+            .enumerate()
+        {
             names[cli_count + i] = n;
         }
     }

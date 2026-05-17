@@ -27,12 +27,16 @@ impl Json {
     }
 
     pub(crate) fn banner(&self, targets: &[Target], names: &[Option<String>]) {
+        // `checks` only carries entries that have an actual label, so a
+        // consumer can use it as the structured "named target" list
+        // without having to filter out unnamed CLI / legacy targets. The
+        // legacy `targets` field still enumerates every target in order.
         let entries: Vec<Value> = targets
             .iter()
             .enumerate()
-            .map(|(i, t)| {
-                let name = names.get(i).and_then(Option::as_ref);
-                json!({"target": t.to_string(), "name": name})
+            .filter_map(|(i, t)| {
+                let name = names.get(i).and_then(Option::as_ref)?;
+                Some(json!({"target": t.to_string(), "name": name}))
             })
             .collect();
         emit(&json!({
