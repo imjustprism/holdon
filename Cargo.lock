@@ -1566,6 +1566,7 @@ dependencies = [
  "mongodb",
  "mysql_async",
  "owo-colors",
+ "percent-encoding",
  "predicates",
  "proptest",
  "prost",
