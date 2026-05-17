@@ -227,7 +227,8 @@ async fn run(args: Args) -> Result<ExitStatus> {
     let interrupted = install_signal_handlers();
 
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let runner = Runner::new(cfg);
+    let cfg_for_runner = cfg.clone();
+    let runner = Runner::new(cfg_for_runner);
     let run_handle = tokio::spawn(runner.run(targets, Some(tx)));
     let mut ticker = tokio::time::interval(printer.tick_interval());
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -268,6 +269,48 @@ async fn run(args: Args) -> Result<ExitStatus> {
     } else {
         report.all_ready()
     };
+
+    if args.watch && !ready {
+        eprintln!("holdon: --watch skipped: not all targets became ready");
+    } else if args.watch {
+        if args.watch_interval.is_zero() {
+            eprintln!("holdon: --watch-interval must be greater than zero");
+            return Ok(ExitStatus::Misuse);
+        }
+        if !args.exec.is_empty() {
+            eprintln!("holdon: warning: --watch is active, --exec command will not run");
+        }
+        let targets_for_watch: Vec<Target> =
+            report.results.iter().map(|r| r.target.clone()).collect();
+        // Seed last_ready from each target's actual final state so a
+        // partial-readiness run under --at-least does not produce
+        // spurious "ready -> fail" transitions on the first tick for
+        // targets that were never satisfied.
+        let initial_ready: Vec<bool> = report.results.iter().map(|r| r.satisfied).collect();
+        let mut attempt_ctx = holdon::checker::AttemptCtx::default();
+        attempt_ctx.attempt_timeout = cfg.attempt_timeout;
+        let reverse = args.reverse || config_data.reverse.unwrap_or(false);
+        watch_loop(
+            targets_for_watch,
+            initial_ready,
+            attempt_ctx,
+            args.watch_interval,
+            reverse,
+            &interrupted,
+        )
+        .await;
+        let sig = interrupted.load(Ordering::SeqCst);
+        return Ok(if sig == SIG_NONE {
+            // watch_loop returned without an interrupt. This is only
+            // possible when the loop refused to start (zero interval is
+            // already handled above, so this is defensive). Treat as
+            // misuse rather than masquerading as a SIGINT exit.
+            ExitStatus::Misuse
+        } else {
+            ExitStatus::Signal(signal_exit_code(sig))
+        });
+    }
+
     let should_exec = !args.exec.is_empty() && (ready || !args.strict);
 
     if let (true, Some((program, rest))) = (should_exec, args.exec.split_first()) {
@@ -472,4 +515,109 @@ fn install_panic_hook() {
         let _ = crossterm::execute!(std::io::stderr(), crossterm::cursor::Show);
         prev(info);
     }));
+}
+
+/// Continuously re-probe every target on a fixed interval and write a
+/// one-line stderr message whenever a target transitions ready->fail or
+/// fail->ready. Returns when SIGINT/SIGTERM fires.
+///
+/// Entered only after the initial run has reported every target as ready.
+/// The starting per-target state is therefore `true`. The function never
+/// returns under normal operation; the caller is expected to translate
+/// the interrupt into an exit code.
+async fn watch_loop(
+    targets: Vec<Target>,
+    initial_ready: Vec<bool>,
+    ctx: holdon::checker::AttemptCtx,
+    interval: Duration,
+    reverse: bool,
+    interrupted: &Arc<AtomicU8>,
+) {
+    use std::io::Write as _;
+    let mut last_ready: Vec<bool> = initial_ready;
+    if last_ready.len() != targets.len() {
+        last_ready.resize(targets.len(), true);
+    }
+    // Caller validates watch_interval before reaching this function.
+    // Belt-and-braces: refuse a zero interval here too so a library-style
+    // future caller cannot crash tokio::time::interval.
+    if interval.is_zero() {
+        let _ = writeln!(
+            std::io::stderr(),
+            "holdon: --watch-interval must be greater than zero"
+        );
+        return;
+    }
+    let _ = writeln!(
+        std::io::stderr(),
+        "holdon: watch mode, interval={}s (Ctrl-C to exit)",
+        interval.as_secs_f64()
+    );
+    let mut ticker = tokio::time::interval(interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // First tick fires immediately; drop it so we wait one full interval
+    // after entering watch mode before reprobing.
+    ticker.tick().await;
+    loop {
+        tokio::select! {
+            biased;
+            _ = wait_interrupt(interrupted) => {
+                let _ = writeln!(std::io::stderr(), "holdon: watch exiting on signal");
+                return;
+            }
+            _ = ticker.tick() => {
+                let mut set = tokio::task::JoinSet::new();
+                for (idx, target) in targets.iter().enumerate() {
+                    let target = target.clone();
+                    set.spawn(async move {
+                        let outcome = target.probe(ctx).await;
+                        // Match runner.rs Direction::Reverse: invert
+                        // the raw probe result so "ready" means
+                        // "satisfied the user's intent", regardless of
+                        // whether they were waiting for up or for down.
+                        let ready = if reverse {
+                            !outcome.is_ready()
+                        } else {
+                            outcome.is_ready()
+                        };
+                        (idx, ready, target)
+                    });
+                }
+                let mut aborted = false;
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = wait_interrupt(interrupted) => {
+                            // Abort outstanding probes so the user does not
+                            // wait up to attempt_timeout for the slowest one
+                            // before the process can exit.
+                            set.abort_all();
+                            aborted = true;
+                            break;
+                        }
+                        joined = set.join_next() => match joined {
+                            Some(Ok((idx, ready, target))) => {
+                                if let Some(prev) = last_ready.get_mut(idx) {
+                                    if ready != *prev {
+                                        let arrow = if ready { "fail -> ready" } else { "ready -> fail" };
+                                        let _ = writeln!(
+                                            std::io::stderr(),
+                                            "holdon: [{idx}] {target}: {arrow}"
+                                        );
+                                        *prev = ready;
+                                    }
+                                }
+                            }
+                            Some(Err(_)) => {}
+                            None => break,
+                        }
+                    }
+                }
+                if aborted {
+                    let _ = writeln!(std::io::stderr(), "holdon: watch exiting on signal");
+                    return;
+                }
+            }
+        }
+    }
 }
