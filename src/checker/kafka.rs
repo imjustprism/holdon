@@ -18,6 +18,15 @@ pub(super) async fn probe(
     install_rustls_provider_once();
     let start = Instant::now();
     let pw = url.password().unwrap_or("").to_owned();
+    let has_userinfo = !pw.is_empty() || !url.username().is_empty();
+    if has_userinfo && !url.scheme().eq_ignore_ascii_case("kafkas") {
+        return vec![err_stage(
+            StageKind::Kafka,
+            start.elapsed(),
+            "refusing to send credentials over a non-TLS kafka:// URL",
+            Some(hints::CLEARTEXT_CREDS),
+        )];
+    }
     let stage = match timeout(ctx.attempt_timeout, run(url, topic, min_partitions)).await {
         Ok(Ok(())) => ok_stage(StageKind::Kafka, start.elapsed()),
         Ok(Err(e)) => {
