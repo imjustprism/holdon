@@ -109,7 +109,12 @@ impl Plain {
         Duration::from_millis(theme::SPINNER_INTERVAL_MS)
     }
 
-    pub(crate) fn banner(&mut self, targets: &[Target], cmd: Option<&[String]>) {
+    pub(crate) fn banner(
+        &mut self,
+        targets: &[Target],
+        names: &[Option<String>],
+        cmd: Option<&[String]>,
+    ) {
         self.started = Instant::now();
         self.states = targets
             .iter()
@@ -128,6 +133,19 @@ impl Plain {
             self.style.paint(theme::DOLLAR, Color::Subtle),
             self.style.paint(&echo, Color::Text),
         );
+        // Emit one labelled line per [[check]] block with a name so the
+        // user sees the mapping between human label and resolved target.
+        for (target, name) in targets.iter().zip(names.iter()) {
+            if let Some(label) = name.as_deref().filter(|s| !s.is_empty()) {
+                let _ = writeln!(
+                    io::stderr(),
+                    "  {} {} = {}",
+                    self.style.paint("•", Color::Subtle),
+                    self.style.paint(label, Color::Text),
+                    self.style.paint(&target.to_string(), Color::Subtle),
+                );
+            }
+        }
         self.redraw();
     }
 

@@ -26,12 +26,21 @@ impl Json {
         Self
     }
 
-    pub(crate) fn banner(&self, targets: &[Target]) {
+    pub(crate) fn banner(&self, targets: &[Target], names: &[Option<String>]) {
+        let entries: Vec<Value> = targets
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let name = names.get(i).and_then(Option::as_ref);
+                json!({"target": t.to_string(), "name": name})
+            })
+            .collect();
         emit(&json!({
             "v": VERSION,
             "ts_unix_ms": now_unix_ms(),
             "event": "start",
             "targets": targets.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            "checks": entries,
         }));
     }
 
