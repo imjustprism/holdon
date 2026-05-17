@@ -311,21 +311,27 @@ async fn read_capped<R: AsyncReadExt + Unpin>(reader: &mut R) -> Result<Vec<u8>,
     let mut buf = Vec::with_capacity(4096);
     let mut chunk = [0u8; 4096];
     loop {
-        if buf.len() >= HTTP_READ_CAP {
-            // Surface a precise error instead of silently returning a
-            // truncated buffer that would later confuse the JSON or
-            // chunked-body decoder with an unrelated message.
-            return Err(ProbeError::Protocol(format!(
-                "Docker engine response exceeded {HTTP_READ_CAP} bytes"
-            )));
+        if buf.len() == HTTP_READ_CAP {
+            // Buffer holds exactly the cap. Peek one more byte to tell an
+            // exact-fit response apart from one that exceeds the cap and
+            // would otherwise be silently truncated.
+            let mut overflow = [0u8; 1];
+            return match reader.read(&mut overflow).await {
+                Ok(0) => Ok(buf),
+                Ok(_) => Err(ProbeError::Protocol(format!(
+                    "Docker engine response exceeded {HTTP_READ_CAP} bytes"
+                ))),
+                Err(e) => Err(ProbeError::Connect(format!(
+                    "reading response: {}",
+                    io_kind(&e)
+                ))),
+            };
         }
-        match reader.read(&mut chunk).await {
+        let remaining = HTTP_READ_CAP - buf.len();
+        let take_max = remaining.min(chunk.len());
+        match reader.read(&mut chunk[..take_max]).await {
             Ok(0) => break,
-            Ok(n) => {
-                let remaining = HTTP_READ_CAP - buf.len();
-                let take = n.min(remaining);
-                buf.extend_from_slice(&chunk[..take]);
-            }
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
             Err(e) => {
                 return Err(ProbeError::Connect(format!(
                     "reading response: {}",
