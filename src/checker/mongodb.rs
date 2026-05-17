@@ -3,6 +3,7 @@ use std::time::Instant;
 use mongodb::Client;
 use mongodb::bson::doc;
 use mongodb::options::ClientOptions;
+use tokio::time::timeout;
 use url::Url;
 
 use super::hint::{Hintable, hints};
@@ -46,9 +47,13 @@ pub(super) async fn probe(url: &Url, ctx: AttemptCtx) -> Vec<Stage> {
         )];
     }
     let conn_str = url.as_str().to_owned();
-    let stage = match ping(&conn_str, ctx).await {
-        Ok(()) => ok_stage(StageKind::Mongodb, start.elapsed()),
-        Err(e) => {
+    // Wrap the whole ping in attempt_timeout. The driver's
+    // server_selection_timeout and connect_timeout only cover later
+    // stages; mongodb+srv:// also performs unbounded DNS SRV lookups
+    // inside ClientOptions::parse before those timeouts apply.
+    let stage = match timeout(ctx.attempt_timeout, ping(&conn_str, ctx)).await {
+        Ok(Ok(())) => ok_stage(StageKind::Mongodb, start.elapsed()),
+        Ok(Err(e)) => {
             let hint = e.hint();
             let mut msg = format_error_chain(&e);
             if !pw.is_empty() {
@@ -57,6 +62,12 @@ pub(super) async fn probe(url: &Url, ctx: AttemptCtx) -> Vec<Stage> {
             }
             err_stage(StageKind::Mongodb, start.elapsed(), msg, hint)
         }
+        Err(_) => err_stage(
+            StageKind::Mongodb,
+            ctx.attempt_timeout,
+            hints::TIMED_OUT,
+            Some(hints::MONGODB_NOT_READY),
+        ),
     };
     vec![stage]
 }
