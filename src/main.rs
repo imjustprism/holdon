@@ -270,13 +270,24 @@ async fn run(args: Args) -> Result<ExitStatus> {
         report.all_ready()
     };
 
-    if args.watch && ready {
+    if args.watch && !ready {
+        eprintln!("holdon: --watch skipped: not all targets became ready");
+    } else if args.watch {
+        if !args.exec.is_empty() {
+            eprintln!("holdon: warning: --watch is active, --exec command will not run");
+        }
         let targets_for_watch: Vec<Target> =
             report.results.iter().map(|r| r.target.clone()).collect();
+        // Seed last_ready from each target's actual final state so a
+        // partial-readiness run under --at-least does not produce
+        // spurious "ready -> fail" transitions on the first tick for
+        // targets that were never satisfied.
+        let initial_ready: Vec<bool> = report.results.iter().map(|r| r.satisfied).collect();
         let mut attempt_ctx = holdon::checker::AttemptCtx::default();
         attempt_ctx.attempt_timeout = cfg.attempt_timeout;
         watch_loop(
             targets_for_watch,
+            initial_ready,
             attempt_ctx,
             args.watch_interval,
             &interrupted,
@@ -503,12 +514,16 @@ fn install_panic_hook() {
 /// the interrupt into an exit code.
 async fn watch_loop(
     targets: Vec<Target>,
+    initial_ready: Vec<bool>,
     ctx: holdon::checker::AttemptCtx,
     interval: Duration,
     interrupted: &Arc<AtomicU8>,
 ) {
     use std::io::Write as _;
-    let mut last_ready: Vec<bool> = vec![true; targets.len()];
+    let mut last_ready: Vec<bool> = initial_ready;
+    if last_ready.len() != targets.len() {
+        last_ready.resize(targets.len(), true);
+    }
     let _ = writeln!(
         std::io::stderr(),
         "holdon: watch mode, interval={}s (Ctrl-C to exit)",
