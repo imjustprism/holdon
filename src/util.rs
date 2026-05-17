@@ -127,12 +127,18 @@ pub fn parse_duration(s: &str) -> Result<Duration, String> {
         "h" => MICROS_PER_HOUR,
         other => return Err(format!("unknown unit `{other}` (use ms, s, m, h)")),
     };
+    let scaled = n * mult_us;
+    if !scaled.is_finite() || scaled > MAX_F64_MICROS {
+        return Err(format!(
+            "duration `{s}` is too large, use `never` for an unbounded value"
+        ));
+    }
     #[allow(
         clippy::cast_sign_loss,
         clippy::cast_possible_truncation,
         clippy::cast_precision_loss
     )]
-    let micros = (n * mult_us).clamp(0.0, MAX_F64_MICROS) as u64;
+    let micros = scaled as u64;
     Ok(Duration::from_micros(micros))
 }
 
@@ -162,6 +168,15 @@ mod tests {
         assert!(parse_duration("NaN").is_err());
         assert!(parse_duration("-5s").is_err());
         assert!(parse_duration("5x").is_err());
+    }
+
+    #[test]
+    fn rejects_overflow_distinct_from_never() {
+        // 1e11 hours * 3600s/h * 1e6 us/s = 3.6e20 us, well above MAX_F64_MICROS (~9.2e18).
+        let err = parse_duration("100000000000h").unwrap_err();
+        assert!(err.contains("too large"), "got: {err}");
+        assert!(err.contains("never"), "got: {err}");
+        assert_eq!(parse_duration("never").unwrap(), Duration::MAX);
     }
 
     #[test]
