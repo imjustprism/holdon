@@ -6,7 +6,7 @@ use tokio::time::timeout;
 use super::hint::hints;
 use super::{AttemptCtx, err_stage, ok_stage};
 use crate::diagnostic::{Stage, StageKind};
-use crate::util::format_error_chain;
+use crate::util::{format_error_chain, sanitize_for_terminal};
 
 pub(super) async fn probe(host: &str, ctx: AttemptCtx) -> Vec<Stage> {
     let start = Instant::now();
@@ -28,7 +28,7 @@ pub(super) async fn probe(host: &str, ctx: AttemptCtx) -> Vec<Stage> {
         Ok(Err(e)) => err_stage(
             StageKind::Dns,
             start.elapsed(),
-            format!("resolver task: {e}"),
+            sanitize_for_terminal(&format!("resolver task: {e}")),
             None,
         ),
         Err(_) => err_stage(StageKind::Dns, ctx.attempt_timeout, hints::TIMED_OUT, None),
