@@ -949,9 +949,10 @@ fn parse_docker_target(input: &str, url: &Url) -> Result<Target> {
     let path = url.path().trim_matches('/');
     let name = if path.is_empty() {
         host.to_owned()
-    } else if !path.contains('/') {
-        format!("{host}/{path}")
     } else {
+        // Container names cannot contain `/`. A non-empty path is
+        // therefore always a user error and should fail at parse time
+        // rather than reaching the daemon and returning 404.
         return Err(parse_err(
             input,
             "docker:// expected docker://<container> (no path segments)",

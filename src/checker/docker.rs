@@ -74,7 +74,7 @@ pub(super) async fn probe(name: &str, expect: &DockerExpect, ctx: AttemptCtx) ->
             StageKind::Docker,
             ctx.attempt_timeout,
             hints::TIMED_OUT,
-            Some(hints::DOCKER_NOT_RUNNING),
+            Some(hints::DOCKER_NO_SOCKET),
         ),
     };
     vec![stage]
@@ -163,7 +163,8 @@ fn parse_response(raw: &[u8]) -> Result<(u16, String), ProbeError> {
         .filter_map(|l| l.split_once(':'))
         .any(|(k, v)| {
             k.trim().eq_ignore_ascii_case("transfer-encoding")
-                && v.trim().eq_ignore_ascii_case("chunked")
+                && v.split(',')
+                    .any(|t| t.trim().eq_ignore_ascii_case("chunked"))
         });
     let body_str = if chunked {
         decode_chunked(body)?
@@ -201,7 +202,14 @@ fn decode_chunked(body: &[u8]) -> Result<String, ProbeError> {
             return Err(ProbeError::Protocol("chunked body truncated".into()));
         }
         out.extend_from_slice(&body[cursor..cursor + size]);
-        cursor += size + 2;
+        cursor += size;
+        // RFC 9112: each chunk ends with CRLF after the data. Validate it
+        // explicitly so a truncation between chunks surfaces a precise
+        // error instead of a downstream "invalid chunk size" message.
+        if cursor + 2 > body.len() || &body[cursor..cursor + 2] != b"\r\n" {
+            return Err(ProbeError::Protocol("chunk missing trailing CRLF".into()));
+        }
+        cursor += 2;
     }
     String::from_utf8(out).map_err(|_| ProbeError::Protocol("chunked body not UTF-8".into()))
 }
@@ -304,7 +312,12 @@ async fn read_capped<R: AsyncReadExt + Unpin>(reader: &mut R) -> Result<Vec<u8>,
     let mut chunk = [0u8; 4096];
     loop {
         if buf.len() >= HTTP_READ_CAP {
-            break;
+            // Surface a precise error instead of silently returning a
+            // truncated buffer that would later confuse the JSON or
+            // chunked-body decoder with an unrelated message.
+            return Err(ProbeError::Protocol(format!(
+                "Docker engine response exceeded {HTTP_READ_CAP} bytes"
+            )));
         }
         match reader.read(&mut chunk).await {
             Ok(0) => break,
