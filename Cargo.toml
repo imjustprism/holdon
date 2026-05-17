@@ -75,7 +75,7 @@ full = [
 ]
 
 [dependencies]
-tokio = { version = "1.41", default-features = false, features = [
+tokio = { version = "1.44", default-features = false, features = [
   "rt",
   "macros",
   "net",
