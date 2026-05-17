@@ -273,6 +273,10 @@ async fn run(args: Args) -> Result<ExitStatus> {
     if args.watch && !ready {
         eprintln!("holdon: --watch skipped: not all targets became ready");
     } else if args.watch {
+        if args.watch_interval.is_zero() {
+            eprintln!("holdon: --watch-interval must be greater than zero");
+            return Ok(ExitStatus::Misuse);
+        }
         if !args.exec.is_empty() {
             eprintln!("holdon: warning: --watch is active, --exec command will not run");
         }
@@ -293,9 +297,16 @@ async fn run(args: Args) -> Result<ExitStatus> {
             &interrupted,
         )
         .await;
-        return Ok(ExitStatus::Signal(signal_exit_code(
-            interrupted.load(Ordering::SeqCst),
-        )));
+        let sig = interrupted.load(Ordering::SeqCst);
+        return Ok(if sig == SIG_NONE {
+            // watch_loop returned without an interrupt. This is only
+            // possible when the loop refused to start (zero interval is
+            // already handled above, so this is defensive). Treat as
+            // misuse rather than masquerading as a SIGINT exit.
+            ExitStatus::Misuse
+        } else {
+            ExitStatus::Signal(signal_exit_code(sig))
+        });
     }
 
     let should_exec = !args.exec.is_empty() && (ready || !args.strict);
@@ -524,9 +535,10 @@ async fn watch_loop(
     if last_ready.len() != targets.len() {
         last_ready.resize(targets.len(), true);
     }
+    // Caller validates watch_interval before reaching this function.
+    // Belt-and-braces: refuse a zero interval here too so a library-style
+    // future caller cannot crash tokio::time::interval.
     if interval.is_zero() {
-        // tokio::time::interval panics on a zero period. Refuse cleanly
-        // instead of crashing the process.
         let _ = writeln!(
             std::io::stderr(),
             "holdon: --watch-interval must be greater than zero"
