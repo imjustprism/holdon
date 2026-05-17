@@ -143,6 +143,35 @@ pub enum Target {
         name: String,
         expect: DockerExpect,
     },
+    #[non_exhaustive]
+    K8s {
+        kind: K8sKind,
+        namespace: String,
+        name: String,
+    },
+}
+
+/// Kinds of Kubernetes resource that [`Target::K8s`] knows how to probe.
+///
+/// New kinds can land without breaking external pattern matches that use a
+/// wildcard arm because the enum is `#[non_exhaustive]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum K8sKind {
+    Pod,
+    Deployment,
+    Job,
+}
+
+impl K8sKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pod => "pod",
+            Self::Deployment => "deployment",
+            Self::Job => "job",
+        }
+    }
 }
 
 /// Container state expectations for a [`Target::Docker`] target.
@@ -349,6 +378,16 @@ impl fmt::Debug for Target {
                 .field("name", name)
                 .field("expect", expect)
                 .finish(),
+            Self::K8s {
+                kind,
+                namespace,
+                name,
+            } => f
+                .debug_struct("K8s")
+                .field("kind", &kind.as_str())
+                .field("namespace", namespace)
+                .field("name", name)
+                .finish(),
         }
     }
 }
@@ -385,6 +424,11 @@ impl fmt::Display for Target {
                 }
                 Ok(())
             }
+            Self::K8s {
+                kind,
+                namespace,
+                name,
+            } => write!(f, "k8s://{}/{namespace}/{name}", kind.as_str()),
             Self::Exec { program, args } => {
                 write!(f, "exec://{}", program.display())?;
                 for (i, a) in args.iter().enumerate() {
@@ -926,6 +970,7 @@ impl FromStr for Target {
                 Ok(Self::Log { path, matcher })
             }
             "docker" => parse_docker_target(input, &url),
+            "k8s" | "kubernetes" => parse_k8s_target(input, &url),
             other => Err(Error::UnsupportedScheme(other.into())),
         }
     }
@@ -999,6 +1044,70 @@ fn parse_docker_target(input: &str, url: &Url) -> Result<Target> {
         }
     }
     Ok(Target::Docker { name, expect })
+}
+
+fn parse_k8s_target(input: &str, url: &Url) -> Result<Target> {
+    // k8s://<kind>/<namespace>/<name>
+    // host is <kind>, path is /<namespace>/<name>
+    let kind_raw = url
+        .host_str()
+        .ok_or_else(|| parse_err(input, "k8s:// requires <kind>/<namespace>/<name>"))?;
+    let kind = match kind_raw.to_ascii_lowercase().as_str() {
+        "pod" | "pods" => K8sKind::Pod,
+        "deployment" | "deployments" | "deploy" => K8sKind::Deployment,
+        "job" | "jobs" => K8sKind::Job,
+        other => {
+            return Err(parse_err(
+                input,
+                &format!("k8s:// kind `{other}` not supported (expected pod, deployment, or job)"),
+            ));
+        }
+    };
+    let path = url.path().trim_matches('/');
+    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    let [namespace, name] = parts.as_slice() else {
+        return Err(parse_err(
+            input,
+            "k8s:// expected k8s://<kind>/<namespace>/<name>",
+        ));
+    };
+    if !is_valid_k8s_name(namespace) {
+        return Err(parse_err(
+            input,
+            "k8s:// namespace must match RFC 1123 (lowercase, digits, dashes, dots)",
+        ));
+    }
+    if !is_valid_k8s_name(name) {
+        return Err(parse_err(
+            input,
+            "k8s:// resource name must match RFC 1123 (lowercase, digits, dashes, dots)",
+        ));
+    }
+    if url.query().is_some() {
+        return Err(parse_err(input, "k8s:// does not accept query parameters"));
+    }
+    Ok(Target::K8s {
+        kind,
+        namespace: (*namespace).to_owned(),
+        name: (*name).to_owned(),
+    })
+}
+
+/// RFC 1123 DNS subdomain: lowercase alphanumeric, `-`, and `.`, must start
+/// and end with alphanumeric, 1..=253 characters. Kubernetes resource and
+/// namespace names follow this rule.
+fn is_valid_k8s_name(s: &str) -> bool {
+    if s.is_empty() || s.len() > 253 {
+        return false;
+    }
+    let bytes = s.as_bytes();
+    let endpoint_ok = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit();
+    if !endpoint_ok(bytes[0]) || !endpoint_ok(bytes[bytes.len() - 1]) {
+        return false;
+    }
+    bytes
+        .iter()
+        .all(|&b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'.')
 }
 
 fn parse_exec_target(rest: &str, input: &str) -> Result<Target> {
@@ -1195,6 +1304,63 @@ mod tests {
             msg.contains('\u{fffd}'),
             "expected replacement char in: {msg}"
         );
+    }
+
+    #[test]
+    fn k8s_pod_parse() {
+        let t: Target = "k8s://pod/default/api".parse().unwrap();
+        match t {
+            Target::K8s {
+                kind,
+                namespace,
+                name,
+            } => {
+                assert_eq!(kind, K8sKind::Pod);
+                assert_eq!(namespace, "default");
+                assert_eq!(name, "api");
+            }
+            _ => panic!("expected K8s variant"),
+        }
+    }
+
+    #[test]
+    fn k8s_aliases() {
+        assert!("k8s://pods/default/api".parse::<Target>().is_ok());
+        assert!(
+            "k8s://deployments/kube-system/core-dns"
+                .parse::<Target>()
+                .is_ok()
+        );
+        assert!(
+            "k8s://deploy/kube-system/core-dns"
+                .parse::<Target>()
+                .is_ok()
+        );
+        assert!("k8s://jobs/ci/build-42".parse::<Target>().is_ok());
+        assert!("kubernetes://pod/default/api".parse::<Target>().is_ok());
+    }
+
+    #[test]
+    fn k8s_rejects_unknown_kind() {
+        assert!("k8s://configmap/default/feature".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn k8s_rejects_invalid_name() {
+        assert!("k8s://pod/default/CAPS".parse::<Target>().is_err());
+        assert!("k8s://pod/default/-leading-dash".parse::<Target>().is_err());
+        assert!("k8s://pod//missing-ns".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn k8s_rejects_query() {
+        assert!("k8s://pod/default/api?foo=bar".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn k8s_display_roundtrip() {
+        let t: Target = "k8s://deployments/kube-system/core-dns".parse().unwrap();
+        assert_eq!(format!("{t}"), "k8s://deployment/kube-system/core-dns");
     }
 
     #[test]
