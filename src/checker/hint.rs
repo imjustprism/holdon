@@ -107,8 +107,7 @@ pub(crate) mod hints {
         "topic has fewer partitions than required by ?expect-partitions";
     pub(crate) const KAFKA_TLS: &str =
         "tls handshake failed, check kafkas:// and CA cert configuration";
-    pub(crate) const CLEARTEXT_CREDS: &str =
-        "credentials over a non-TLS scheme would be sent in plaintext; switch to the TLS scheme (rediss://, mongodb+srv://, kafkas://, amqps://) or remove the password";
+    pub(crate) const CLEARTEXT_CREDS: &str = "credentials over a non-TLS scheme would be sent in plaintext, switch to the TLS scheme (rediss://, mongodb+srv:// or mongodb://?tls=true, kafkas://, amqps://) or remove the password";
 }
 
 impl Hintable for std::io::Error {

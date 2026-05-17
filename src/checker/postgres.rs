@@ -122,42 +122,6 @@ async fn connect_and_query(
     }
 }
 
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn enforce_passthrough_when_disabled() {
-        let url = Url::parse("postgres://u@h/?sslmode=disable").unwrap();
-        assert_eq!(enforce_sslmode(&url, false).as_str(), url.as_str());
-    }
-
-    #[test]
-    fn enforce_appends_require_when_missing() {
-        let url = Url::parse("postgres://u@h/").unwrap();
-        let out = enforce_sslmode(&url, true);
-        assert!(out.query_pairs().any(|(k, v)| k == "sslmode" && v == "require"));
-    }
-
-    #[test]
-    fn enforce_upgrades_prefer_to_require() {
-        let url = Url::parse("postgres://u@h/?sslmode=prefer&x=1").unwrap();
-        let out = enforce_sslmode(&url, true);
-        let pairs: Vec<_> = out.query_pairs().collect();
-        assert!(pairs.iter().any(|(k, v)| k == "sslmode" && v == "require"));
-        assert!(pairs.iter().any(|(k, v)| k == "x" && v == "1"));
-        assert!(pairs.iter().filter(|(k, _)| k == "sslmode").count() == 1);
-    }
-
-    #[test]
-    fn enforce_keeps_verify_full() {
-        let url = Url::parse("postgres://u@h/?sslmode=verify-full").unwrap();
-        let out = enforce_sslmode(&url, true);
-        assert!(out.query_pairs().any(|(k, v)| k == "sslmode" && v == "verify-full"));
-    }
-}
-
 async fn run_queries(
     client: &tokio_postgres::Client,
     expect_table: Option<&str>,
@@ -177,4 +141,46 @@ async fn run_queries(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enforce_passthrough_when_disabled() {
+        let url = Url::parse("postgres://u@h/?sslmode=disable").unwrap();
+        assert_eq!(enforce_sslmode(&url, false).as_str(), url.as_str());
+    }
+
+    #[test]
+    fn enforce_appends_require_when_missing() {
+        let url = Url::parse("postgres://u@h/").unwrap();
+        let out = enforce_sslmode(&url, true);
+        assert!(
+            out.query_pairs()
+                .any(|(k, v)| k == "sslmode" && v == "require")
+        );
+    }
+
+    #[test]
+    fn enforce_upgrades_prefer_to_require() {
+        let url = Url::parse("postgres://u@h/?sslmode=prefer&x=1").unwrap();
+        let out = enforce_sslmode(&url, true);
+        let pairs: Vec<_> = out.query_pairs().collect();
+        assert!(pairs.iter().any(|(k, v)| k == "sslmode" && v == "require"));
+        assert!(pairs.iter().any(|(k, v)| k == "x" && v == "1"));
+        assert!(pairs.iter().filter(|(k, _)| k == "sslmode").count() == 1);
+    }
+
+    #[test]
+    fn enforce_keeps_verify_full() {
+        let url = Url::parse("postgres://u@h/?sslmode=verify-full").unwrap();
+        let out = enforce_sslmode(&url, true);
+        assert!(
+            out.query_pairs()
+                .any(|(k, v)| k == "sslmode" && v == "verify-full")
+        );
+    }
 }

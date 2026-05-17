@@ -36,7 +36,8 @@ pub(super) async fn probe(url: &Url, ctx: AttemptCtx) -> Vec<Stage> {
     install_rustls_provider_once();
     let start = Instant::now();
     let pw = url.password().unwrap_or("").to_owned();
-    if !pw.is_empty() && !mongo_tls_in_effect(url) {
+    let has_userinfo = !pw.is_empty() || !url.username().is_empty();
+    if has_userinfo && !mongo_tls_in_effect(url) {
         return vec![err_stage(
             StageKind::Mongodb,
             start.elapsed(),

@@ -84,39 +84,6 @@ impl Hintable for ProbeError {
     }
 }
 
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn enforce_passthrough_when_disabled() {
-        let url = Url::parse("mysql://u@h/?ssl-mode=DISABLED").unwrap();
-        assert_eq!(enforce_sslmode(&url, false).as_str(), url.as_str());
-    }
-
-    #[test]
-    fn enforce_appends_required_when_missing() {
-        let url = Url::parse("mysql://u@h/").unwrap();
-        let out = enforce_sslmode(&url, true);
-        assert!(out.query_pairs().any(|(k, v)| k == "ssl-mode" && v == "REQUIRED"));
-    }
-
-    #[test]
-    fn enforce_upgrades_preferred_to_required() {
-        let url = Url::parse("mysql://u@h/?ssl-mode=PREFERRED").unwrap();
-        let out = enforce_sslmode(&url, true);
-        assert!(out.query_pairs().any(|(k, v)| k == "ssl-mode" && v == "REQUIRED"));
-    }
-
-    #[test]
-    fn enforce_keeps_verify_identity() {
-        let url = Url::parse("mysql://u@h/?ssl-mode=VERIFY_IDENTITY").unwrap();
-        let out = enforce_sslmode(&url, true);
-        assert!(out.query_pairs().any(|(k, v)| k == "ssl-mode" && v == "VERIFY_IDENTITY"));
-    }
-}
-
 async fn connect_and_query(
     conn_str: String,
     want_tls: bool,
@@ -155,4 +122,46 @@ async fn connect_and_query(
     }
     conn.disconnect().await?;
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enforce_passthrough_when_disabled() {
+        let url = Url::parse("mysql://u@h/?ssl-mode=DISABLED").unwrap();
+        assert_eq!(enforce_sslmode(&url, false).as_str(), url.as_str());
+    }
+
+    #[test]
+    fn enforce_appends_required_when_missing() {
+        let url = Url::parse("mysql://u@h/").unwrap();
+        let out = enforce_sslmode(&url, true);
+        assert!(
+            out.query_pairs()
+                .any(|(k, v)| k == "ssl-mode" && v == "REQUIRED")
+        );
+    }
+
+    #[test]
+    fn enforce_upgrades_preferred_to_required() {
+        let url = Url::parse("mysql://u@h/?ssl-mode=PREFERRED").unwrap();
+        let out = enforce_sslmode(&url, true);
+        assert!(
+            out.query_pairs()
+                .any(|(k, v)| k == "ssl-mode" && v == "REQUIRED")
+        );
+    }
+
+    #[test]
+    fn enforce_keeps_verify_identity() {
+        let url = Url::parse("mysql://u@h/?ssl-mode=VERIFY_IDENTITY").unwrap();
+        let out = enforce_sslmode(&url, true);
+        assert!(
+            out.query_pairs()
+                .any(|(k, v)| k == "ssl-mode" && v == "VERIFY_IDENTITY")
+        );
+    }
 }
