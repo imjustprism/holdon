@@ -69,7 +69,7 @@ impl Target {
         let stages = match self {
             Self::Tcp { host, port } => tcp::probe(host.as_str(), *port, ctx).await,
             Self::Dns { host } => dns::probe(host.as_str(), ctx).await,
-            Self::File { path, mode } => file::probe(path, *mode).await,
+            Self::File { path, mode } => file::probe(path, *mode, ctx).await,
             #[cfg(feature = "http")]
             Self::Http { url, expect } => http::probe(url, expect, ctx).await,
             #[cfg(not(feature = "http"))]

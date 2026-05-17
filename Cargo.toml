@@ -60,6 +60,7 @@ kafka = ["dep:rskafka", "dep:rustls", "dep:webpki-roots"]
 temporal = ["grpc"]
 docker = ["dep:serde_json"]
 k8s = ["http"]
+notify-fs = ["dep:notify"]
 json-output = ["dep:serde_json"]
 all-databases = ["postgres", "redis", "mysql", "mongodb"]
 full = [
@@ -75,6 +76,7 @@ full = [
   "temporal",
   "docker",
   "k8s",
+  "notify-fs",
   "json-output",
 ]
 
@@ -150,6 +152,7 @@ tonic = { version = "0.13", default-features = false, features = [
 prost = { version = "0.13", default-features = false, features = ["std", "derive"], optional = true }
 http = { version = "1.4", default-features = false, optional = true }
 serde_json = { version = "1.0", default-features = false, features = ["std"], optional = true }
+notify = { version = "8", default-features = false, features = ["macos_fsevent"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.44.2", features = ["test-util", "rt-multi-thread", "macros", "net", "time", "io-util"] }
