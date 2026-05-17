@@ -45,6 +45,8 @@ enum ProbeError {
     NotFound,
     #[error("resource not yet ready: {0}")]
     NotReady(String),
+    #[error("job has permanently failed: {0}")]
+    JobFailed(String),
     #[error("unexpected API response: {0}")]
     Protocol(String),
 }
@@ -57,6 +59,7 @@ impl ProbeError {
             Self::Auth => hints::K8S_AUTH,
             Self::NotFound => hints::K8S_NOT_FOUND,
             Self::NotReady(_) => hints::K8S_NOT_READY,
+            Self::JobFailed(_) => hints::K8S_JOB_FAILED,
             Self::Protocol(_) => hints::K8S_PROTOCOL,
         }
     }
@@ -147,8 +150,36 @@ fn check_ready(kind: K8sKind, v: &serde_json::Value) -> Result<(), ProbeError> {
     match kind {
         K8sKind::Pod => check_condition(v, "Ready", "pod"),
         K8sKind::Deployment => check_deployment(v),
-        K8sKind::Job => check_condition(v, "Complete", "job"),
+        K8sKind::Job => check_job(v),
     }
+}
+
+fn check_job(v: &serde_json::Value) -> Result<(), ProbeError> {
+    // Scan for Failed=True first so a job that hit its backoff limit
+    // surfaces a permanent-failure message instead of being retried by
+    // the runner until the overall timeout fires.
+    if let Some(conditions) = v.pointer("/status/conditions").and_then(|c| c.as_array()) {
+        for cond in conditions {
+            let Some(ct) = cond.get("type").and_then(|t| t.as_str()) else {
+                continue;
+            };
+            if !ct.eq_ignore_ascii_case("Failed") {
+                continue;
+            }
+            let status = cond
+                .get("status")
+                .and_then(|s| s.as_str())
+                .unwrap_or("Unknown");
+            if status.eq_ignore_ascii_case("True") {
+                let reason = cond
+                    .get("reason")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("no reason given");
+                return Err(ProbeError::JobFailed(reason.to_owned()));
+            }
+        }
+    }
+    check_condition(v, "Complete", "job")
 }
 
 fn check_condition(v: &serde_json::Value, want: &str, label: &str) -> Result<(), ProbeError> {
@@ -216,6 +247,7 @@ fn load_config() -> Result<K8sConfig, ProbeError> {
         ProbeError::NoConfig("no in-pod service account found and KUBE_SERVER is not set".into())
     })?;
     let token = std::env::var("KUBE_TOKEN")
+        .map(|t| t.trim().to_owned())
         .map_err(|_| ProbeError::NoConfig("KUBE_SERVER set but KUBE_TOKEN missing".into()))?;
     let mut builder = reqwest::Client::builder()
         .user_agent(concat!("holdon/", env!("CARGO_PKG_VERSION")))

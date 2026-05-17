@@ -1074,13 +1074,13 @@ fn parse_k8s_target(input: &str, url: &Url) -> Result<Target> {
     if !is_valid_k8s_name(namespace) {
         return Err(parse_err(
             input,
-            "k8s:// namespace must match RFC 1123 (lowercase, digits, dashes)",
+            "k8s:// namespace must match RFC 1123 (lowercase, digits, dashes, dots)",
         ));
     }
     if !is_valid_k8s_name(name) {
         return Err(parse_err(
             input,
-            "k8s:// resource name must match RFC 1123 (lowercase, digits, dashes)",
+            "k8s:// resource name must match RFC 1123 (lowercase, digits, dashes, dots)",
         ));
     }
     if url.query().is_some() {
@@ -1093,9 +1093,9 @@ fn parse_k8s_target(input: &str, url: &Url) -> Result<Target> {
     })
 }
 
-/// RFC 1123 label: lowercase alphanumeric and `-`, must start and end with
-/// alphanumeric, 1..=253 characters. Kubernetes resource and namespace names
-/// follow this rule.
+/// RFC 1123 DNS subdomain: lowercase alphanumeric, `-`, and `.`, must start
+/// and end with alphanumeric, 1..=253 characters. Kubernetes resource and
+/// namespace names follow this rule.
 fn is_valid_k8s_name(s: &str) -> bool {
     if s.is_empty() || s.len() > 253 {
         return false;

@@ -124,6 +124,7 @@ pub(crate) mod hints {
         "resource exists but is not yet reporting Ready/Complete";
     pub(crate) const K8S_PROTOCOL: &str =
         "unexpected response shape from the Kubernetes API server";
+    pub(crate) const K8S_JOB_FAILED: &str = "job reported Failed=True, this will not recover by waiting, check pod logs and the BackoffLimit setting";
 }
 
 impl Hintable for std::io::Error {
