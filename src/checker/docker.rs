@@ -250,7 +250,7 @@ mod transport {
     use tokio::net::UnixStream;
 
     pub(super) async fn round_trip(request: &[u8]) -> Result<Vec<u8>, ProbeError> {
-        let path = socket_path();
+        let path = socket_path()?;
         let mut stream = UnixStream::connect(&path).await.map_err(|e| {
             ProbeError::Connect(format!(
                 "opening {}: {}",
@@ -269,13 +269,26 @@ mod transport {
         super::read_capped(&mut stream).await
     }
 
-    fn socket_path() -> PathBuf {
-        if let Ok(host) = std::env::var("DOCKER_HOST") {
-            if let Some(rest) = host.strip_prefix("unix://") {
-                return PathBuf::from(rest);
-            }
+    /// Resolve the engine socket path.
+    ///
+    /// Honours `DOCKER_HOST` when it points at a Unix socket (`unix://...`).
+    /// Any other scheme (`tcp://`, `ssh://`, `npipe://`, ...) is refused so
+    /// a CI environment that exports `DOCKER_HOST=tcp://docker:2375` does
+    /// not silently fall through to the local-daemon socket and return
+    /// results from the wrong engine.
+    fn socket_path() -> Result<PathBuf, ProbeError> {
+        match std::env::var("DOCKER_HOST") {
+            Ok(host) if host.is_empty() => Ok(PathBuf::from("/var/run/docker.sock")),
+            Ok(host) => host.strip_prefix("unix://").map_or_else(
+                || {
+                    Err(ProbeError::Connect(format!(
+                        "DOCKER_HOST scheme not supported by holdon (`{host}`), only unix:// is implemented on this platform"
+                    )))
+                },
+                |rest| Ok(PathBuf::from(rest)),
+            ),
+            Err(_) => Ok(PathBuf::from("/var/run/docker.sock")),
         }
-        PathBuf::from("/var/run/docker.sock")
     }
 }
 
@@ -286,7 +299,7 @@ mod transport {
     use tokio::net::windows::named_pipe::ClientOptions;
 
     pub(super) async fn round_trip(request: &[u8]) -> Result<Vec<u8>, ProbeError> {
-        let path = pipe_path();
+        let path = pipe_path()?;
         let mut stream = ClientOptions::new()
             .open(&path)
             .map_err(|e| ProbeError::Connect(format!("opening {path}: {}", super::io_kind(&e))))?;
@@ -297,13 +310,24 @@ mod transport {
         super::read_capped(&mut stream).await
     }
 
-    fn pipe_path() -> String {
-        if let Ok(host) = std::env::var("DOCKER_HOST") {
-            if let Some(rest) = host.strip_prefix("npipe://") {
-                return rest.replace('/', "\\");
-            }
+    /// Resolve the engine named-pipe path.
+    ///
+    /// Honours `DOCKER_HOST` when it points at a named pipe (`npipe://...`).
+    /// Any other scheme is refused rather than falling through to the
+    /// default pipe.
+    fn pipe_path() -> Result<String, ProbeError> {
+        match std::env::var("DOCKER_HOST") {
+            Ok(host) if host.is_empty() => Ok(r"\\.\pipe\docker_engine".to_owned()),
+            Ok(host) => host.strip_prefix("npipe://").map_or_else(
+                || {
+                    Err(ProbeError::Connect(format!(
+                        "DOCKER_HOST scheme not supported by holdon (`{host}`), only npipe:// is implemented on this platform"
+                    )))
+                },
+                |rest| Ok(rest.replace('/', "\\")),
+            ),
+            Err(_) => Ok(r"\\.\pipe\docker_engine".to_owned()),
         }
-        r"\\.\pipe\docker_engine".to_owned()
     }
 }
 
