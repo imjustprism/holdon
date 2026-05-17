@@ -36,6 +36,15 @@ pub(super) async fn probe(url: &Url, ctx: AttemptCtx) -> Vec<Stage> {
     install_rustls_provider_once();
     let start = Instant::now();
     let pw = url.password().unwrap_or("").to_owned();
+    let has_userinfo = !pw.is_empty() || !url.username().is_empty();
+    if has_userinfo && !mongo_tls_in_effect(url) {
+        return vec![err_stage(
+            StageKind::Mongodb,
+            start.elapsed(),
+            "refusing to send credentials over a non-TLS mongodb:// URL",
+            Some(hints::CLEARTEXT_CREDS),
+        )];
+    }
     let conn_str = url.as_str().to_owned();
     let stage = match ping(&conn_str, ctx).await {
         Ok(()) => ok_stage(StageKind::Mongodb, start.elapsed()),
@@ -50,6 +59,19 @@ pub(super) async fn probe(url: &Url, ctx: AttemptCtx) -> Vec<Stage> {
         }
     };
     vec![stage]
+}
+
+/// Returns true when TLS will actually be in effect for the connection:
+/// `mongodb+srv://` always negotiates TLS by default, and `mongodb://` only
+/// uses TLS when the URI explicitly opts in via `tls=true`/`ssl=true`.
+fn mongo_tls_in_effect(url: &Url) -> bool {
+    if url.scheme().eq_ignore_ascii_case("mongodb+srv") {
+        return true;
+    }
+    url.query_pairs().any(|(k, v)| {
+        (k.eq_ignore_ascii_case("tls") || k.eq_ignore_ascii_case("ssl"))
+            && v.eq_ignore_ascii_case("true")
+    })
 }
 
 async fn ping(uri: &str, ctx: AttemptCtx) -> mongodb::error::Result<()> {

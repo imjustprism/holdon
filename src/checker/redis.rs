@@ -1,7 +1,9 @@
+use std::time::Duration;
+
 use url::Url;
 
 use super::hint::{Hintable, hints};
-use super::{AttemptCtx, run_stage};
+use super::{AttemptCtx, err_stage, run_stage};
 use crate::diagnostic::{Stage, StageKind};
 use crate::target::{LogMatcher, RedisKeyExpect};
 
@@ -11,6 +13,14 @@ pub(super) async fn probe(
     ctx: AttemptCtx,
 ) -> Vec<Stage> {
     let pw = url.password().unwrap_or("").to_owned();
+    if !pw.is_empty() && !url.scheme().eq_ignore_ascii_case("rediss") {
+        return vec![err_stage(
+            StageKind::Redis,
+            Duration::ZERO,
+            "refusing to send AUTH over a non-TLS redis:// URL",
+            Some(hints::CLEARTEXT_CREDS),
+        )];
+    }
     let driver_url = super::strip_query_keys(url, &["key", "match", "regex"]);
     let driver_str = driver_url.as_str().to_owned();
     let expect = expect_key.cloned();
