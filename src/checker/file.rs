@@ -68,7 +68,14 @@ async fn wait_for_event(
     use tokio::time::timeout;
 
     let parent = path.parent().filter(|p| !p.as_os_str().is_empty())?;
-    if !parent.is_dir() {
+    // Use the async metadata API: std::path::Path::is_dir calls the
+    // sync fs::metadata syscall, which would stall the Tokio worker on
+    // a slow or network-mounted filesystem.
+    let parent_is_dir = tokio::fs::metadata(parent)
+        .await
+        .map(|m| m.is_dir())
+        .unwrap_or(false);
+    if !parent_is_dir {
         // No usable directory to watch (e.g. /missing/file). Fall back
         // to the polling path.
         return None;
