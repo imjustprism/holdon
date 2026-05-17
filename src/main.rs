@@ -227,7 +227,8 @@ async fn run(args: Args) -> Result<ExitStatus> {
     let interrupted = install_signal_handlers();
 
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let runner = Runner::new(cfg);
+    let cfg_for_runner = cfg.clone();
+    let runner = Runner::new(cfg_for_runner);
     let run_handle = tokio::spawn(runner.run(targets, Some(tx)));
     let mut ticker = tokio::time::interval(printer.tick_interval());
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -268,6 +269,24 @@ async fn run(args: Args) -> Result<ExitStatus> {
     } else {
         report.all_ready()
     };
+
+    if args.watch && ready {
+        let targets_for_watch: Vec<Target> =
+            report.results.iter().map(|r| r.target.clone()).collect();
+        let mut attempt_ctx = holdon::checker::AttemptCtx::default();
+        attempt_ctx.attempt_timeout = cfg.attempt_timeout;
+        watch_loop(
+            targets_for_watch,
+            attempt_ctx,
+            args.watch_interval,
+            &interrupted,
+        )
+        .await;
+        return Ok(ExitStatus::Signal(signal_exit_code(
+            interrupted.load(Ordering::SeqCst),
+        )));
+    }
+
     let should_exec = !args.exec.is_empty() && (ready || !args.strict);
 
     if let (true, Some((program, rest))) = (should_exec, args.exec.split_first()) {
@@ -472,4 +491,65 @@ fn install_panic_hook() {
         let _ = crossterm::execute!(std::io::stderr(), crossterm::cursor::Show);
         prev(info);
     }));
+}
+
+/// Continuously re-probe every target on a fixed interval and write a
+/// one-line stderr message whenever a target transitions ready->fail or
+/// fail->ready. Returns when SIGINT/SIGTERM fires.
+///
+/// Entered only after the initial run has reported every target as ready.
+/// The starting per-target state is therefore `true`. The function never
+/// returns under normal operation; the caller is expected to translate
+/// the interrupt into an exit code.
+async fn watch_loop(
+    targets: Vec<Target>,
+    ctx: holdon::checker::AttemptCtx,
+    interval: Duration,
+    interrupted: &Arc<AtomicU8>,
+) {
+    use std::io::Write as _;
+    let mut last_ready: Vec<bool> = vec![true; targets.len()];
+    let _ = writeln!(
+        std::io::stderr(),
+        "holdon: watch mode, interval={}s (Ctrl-C to exit)",
+        interval.as_secs_f64()
+    );
+    let mut ticker = tokio::time::interval(interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // First tick fires immediately; drop it so we wait one full interval
+    // after entering watch mode before reprobing.
+    ticker.tick().await;
+    loop {
+        tokio::select! {
+            biased;
+            _ = wait_interrupt(interrupted) => {
+                let _ = writeln!(std::io::stderr(), "holdon: watch exiting on signal");
+                return;
+            }
+            _ = ticker.tick() => {
+                let mut set = tokio::task::JoinSet::new();
+                for (idx, target) in targets.iter().enumerate() {
+                    let target = target.clone();
+                    set.spawn(async move {
+                        let outcome = target.probe(ctx).await;
+                        (idx, outcome.is_ready(), target)
+                    });
+                }
+                while let Some(joined) = set.join_next().await {
+                    if let Ok((idx, ready, target)) = joined {
+                        if let Some(prev) = last_ready.get_mut(idx) {
+                            if ready != *prev {
+                                let arrow = if ready { "fail -> ready" } else { "ready -> fail" };
+                                let _ = writeln!(
+                                    std::io::stderr(),
+                                    "holdon: [{idx}] {target}: {arrow}"
+                                );
+                                *prev = ready;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

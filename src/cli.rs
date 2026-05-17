@@ -238,6 +238,16 @@ pub(crate) struct Args {
     #[arg(long, env = "HOLDON_NO_JITTER", action = clap::ArgAction::SetTrue)]
     pub(crate) no_jitter: bool,
 
+    /// After every target is ready, keep probing forever and print a one-line
+    /// message whenever a target transitions ready->fail or fail->ready.
+    /// Exits cleanly on SIGINT/SIGTERM with the matching signal code.
+    #[arg(long, env = "HOLDON_WATCH", action = clap::ArgAction::SetTrue)]
+    pub(crate) watch: bool,
+
+    /// Polling interval used by --watch. Defaults to 5s.
+    #[arg(long, env = "HOLDON_WATCH_INTERVAL", value_parser = holdon::parse_duration, default_value = "5s")]
+    pub(crate) watch_interval: Duration,
+
     #[arg(long, env = "HOLDON_TIMEOUT_EXIT_CODE", default_value_t = crate::DEFAULT_TIMEOUT_EXIT_CODE)]
     pub(crate) timeout_exit_code: u8,
 

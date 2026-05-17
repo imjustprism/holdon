@@ -38,6 +38,16 @@ fn shows_help() {
 }
 
 #[test]
+fn help_lists_watch_flags() {
+    cmd()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--watch"))
+        .stdout(predicate::str::contains("--watch-interval"));
+}
+
+#[test]
 fn no_args_fails_with_misuse() {
     cmd().assert().code(2);
 }
