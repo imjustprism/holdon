@@ -108,15 +108,14 @@ async fn wait_for_event(
             if !relevant {
                 continue;
             }
-            // Atomic-create via `mv tmpfile target` shows up as
-            // EventKind::Rename on Linux (IN_MOVED_TO) and macOS, so
-            // Rename counts as a create here for FileMode::Present.
-            // FileMode::Absent only cares about Remove and the
-            // "rename away" direction, which notify reports as
-            // Rename(RenameMode::From) with the original path. The
-            // re-stat below decides authoritatively.
+            // Atomic-create via `mv tmpfile target` arrives as
+            // EventKind::Modify(ModifyKind::Name(RenameMode::To)) on
+            // Linux (notify v8 folds renames under Modify, not a
+            // top-level Rename variant). The Modify arm therefore
+            // already covers IN_MOVED_TO and the rename-away
+            // direction. The re-stat below decides authoritatively.
             let matches = match event.kind {
-                EventKind::Create(_) | EventKind::Modify(_) | EventKind::Rename(_) => want_create,
+                EventKind::Create(_) | EventKind::Modify(_) => want_create,
                 EventKind::Remove(_) => !want_create,
                 _ => false,
             };
