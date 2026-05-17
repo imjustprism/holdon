@@ -289,11 +289,13 @@ async fn run(args: Args) -> Result<ExitStatus> {
         let initial_ready: Vec<bool> = report.results.iter().map(|r| r.satisfied).collect();
         let mut attempt_ctx = holdon::checker::AttemptCtx::default();
         attempt_ctx.attempt_timeout = cfg.attempt_timeout;
+        let reverse = args.reverse || config_data.reverse.unwrap_or(false);
         watch_loop(
             targets_for_watch,
             initial_ready,
             attempt_ctx,
             args.watch_interval,
+            reverse,
             &interrupted,
         )
         .await;
@@ -528,6 +530,7 @@ async fn watch_loop(
     initial_ready: Vec<bool>,
     ctx: holdon::checker::AttemptCtx,
     interval: Duration,
+    reverse: bool,
     interrupted: &Arc<AtomicU8>,
 ) {
     use std::io::Write as _;
@@ -568,7 +571,16 @@ async fn watch_loop(
                     let target = target.clone();
                     set.spawn(async move {
                         let outcome = target.probe(ctx).await;
-                        (idx, outcome.is_ready(), target)
+                        // Match runner.rs Direction::Reverse: invert
+                        // the raw probe result so "ready" means
+                        // "satisfied the user's intent", regardless of
+                        // whether they were waiting for up or for down.
+                        let ready = if reverse {
+                            !outcome.is_ready()
+                        } else {
+                            outcome.is_ready()
+                        };
+                        (idx, ready, target)
                     });
                 }
                 while let Some(joined) = set.join_next().await {
