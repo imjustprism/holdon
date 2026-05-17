@@ -8,6 +8,8 @@ use crate::target::Target;
 use crate::util::format_error_chain;
 
 mod dns;
+#[cfg(feature = "docker")]
+mod docker;
 mod exec;
 mod file;
 #[cfg(feature = "grpc")]
@@ -120,6 +122,10 @@ impl Target {
             Self::Temporal { url } => temporal::probe(url, ctx).await,
             #[cfg(not(feature = "temporal"))]
             Self::Temporal { .. } => disabled_stage(StageKind::Temporal, "temporal"),
+            #[cfg(feature = "docker")]
+            Self::Docker { name, expect } => docker::probe(name, expect, ctx).await,
+            #[cfg(not(feature = "docker"))]
+            Self::Docker { .. } => disabled_stage(StageKind::Docker, "docker"),
         };
         let ok = stages
             .last()

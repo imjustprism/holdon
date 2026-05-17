@@ -58,6 +58,7 @@ mongodb = ["dep:mongodb", "dep:rustls", "dep:webpki-roots"]
 rabbitmq = ["dep:lapin", "dep:rustls", "dep:webpki-roots"]
 kafka = ["dep:rskafka", "dep:rustls", "dep:webpki-roots"]
 temporal = ["grpc"]
+docker = ["dep:serde_json"]
 json-output = ["dep:serde_json"]
 all-databases = ["postgres", "redis", "mysql", "mongodb"]
 full = [
@@ -71,6 +72,7 @@ full = [
   "rabbitmq",
   "kafka",
   "temporal",
+  "docker",
   "json-output",
 ]
 

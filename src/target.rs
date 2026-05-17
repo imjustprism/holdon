@@ -138,6 +138,28 @@ pub enum Target {
     Temporal {
         url: Url,
     },
+    #[non_exhaustive]
+    Docker {
+        name: String,
+        expect: DockerExpect,
+    },
+}
+
+/// Container state expectations for a [`Target::Docker`] target.
+///
+/// Built from the query string of a `docker://<name>` URL. Empty defaults
+/// mean "container exists and is `running`". Setting `healthy = true`
+/// additionally requires the container to have a healthcheck and to be
+/// reporting `healthy`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct DockerExpect {
+    /// Required `State.Status`. Defaults to `running`. Set via
+    /// `?state=running|paused|exited|created|restarting|removing|dead`.
+    pub state: Option<String>,
+    /// When true, require `State.Health.Status == "healthy"`. The container
+    /// must have a HEALTHCHECK defined or the probe fails.
+    pub require_healthy: bool,
 }
 
 /// Matcher applied to log file content by [`Target::Log`].
@@ -322,6 +344,11 @@ impl fmt::Debug for Target {
                 .debug_struct("Temporal")
                 .field("url", &redact(url))
                 .finish(),
+            Self::Docker { name, expect } => f
+                .debug_struct("Docker")
+                .field("name", name)
+                .field("expect", expect)
+                .finish(),
         }
     }
 }
@@ -345,6 +372,19 @@ impl fmt::Display for Target {
             | Self::Rabbitmq { url, .. }
             | Self::Kafka { url, .. }
             | Self::Temporal { url } => write!(f, "{}", redact(url)),
+            Self::Docker { name, expect } => {
+                write!(f, "docker://{name}")?;
+                let first = if let Some(s) = &expect.state {
+                    write!(f, "?state={s}")?;
+                    false
+                } else {
+                    true
+                };
+                if expect.require_healthy {
+                    write!(f, "{}healthy=true", if first { "?" } else { "&" })?;
+                }
+                Ok(())
+            }
             Self::Exec { program, args } => {
                 write!(f, "exec://{}", program.display())?;
                 for (i, a) in args.iter().enumerate() {
@@ -885,9 +925,79 @@ impl FromStr for Target {
                 };
                 Ok(Self::Log { path, matcher })
             }
+            "docker" => parse_docker_target(input, &url),
             other => Err(Error::UnsupportedScheme(other.into())),
         }
     }
+}
+
+const DOCKER_STATES: &[&str] = &[
+    "created",
+    "running",
+    "paused",
+    "restarting",
+    "removing",
+    "exited",
+    "dead",
+];
+
+fn parse_docker_target(input: &str, url: &Url) -> Result<Target> {
+    // docker://<container-name>[/][?state=running][?healthy=true]
+    let host = url
+        .host_str()
+        .ok_or_else(|| parse_err(input, "docker:// requires a container name"))?;
+    let path = url.path().trim_matches('/');
+    let name = if path.is_empty() {
+        host.to_owned()
+    } else if !path.contains('/') {
+        format!("{host}/{path}")
+    } else {
+        return Err(parse_err(
+            input,
+            "docker:// expected docker://<container> (no path segments)",
+        ));
+    };
+    if name.is_empty() {
+        return Err(parse_err(input, "docker:// container name is empty"));
+    }
+    if name
+        .chars()
+        .any(|c| c.is_control() || c == ' ' || c == '\t')
+    {
+        return Err(parse_err(
+            input,
+            "docker:// container name contains illegal characters",
+        ));
+    }
+    let mut expect = DockerExpect::default();
+    for (k, v) in url.query_pairs() {
+        match k.as_ref() {
+            "state" => {
+                let s = v.to_ascii_lowercase();
+                if !DOCKER_STATES.contains(&s.as_str()) {
+                    return Err(parse_err(
+                        input,
+                        &format!(
+                            "docker:// state `{s}` invalid (expected one of {DOCKER_STATES:?})"
+                        ),
+                    ));
+                }
+                expect.state = Some(s);
+            }
+            "healthy" => {
+                expect.require_healthy = matches!(v.as_ref(), "1" | "true" | "yes");
+            }
+            other => {
+                return Err(parse_err(
+                    input,
+                    &format!(
+                        "unknown docker:// query key `{other}` (only `state` or `healthy` supported)"
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(Target::Docker { name, expect })
 }
 
 fn parse_exec_target(rest: &str, input: &str) -> Result<Target> {
@@ -1084,6 +1194,52 @@ mod tests {
             msg.contains('\u{fffd}'),
             "expected replacement char in: {msg}"
         );
+    }
+
+    #[test]
+    fn docker_scheme_defaults() {
+        let t: Target = "docker://api".parse().unwrap();
+        match t {
+            Target::Docker { name, expect } => {
+                assert_eq!(name, "api");
+                assert_eq!(expect.state, None);
+                assert!(!expect.require_healthy);
+            }
+            _ => panic!("expected Docker variant"),
+        }
+    }
+
+    #[test]
+    fn docker_scheme_with_state_and_healthy() {
+        let t: Target = "docker://api?state=running&healthy=true".parse().unwrap();
+        match t {
+            Target::Docker { name, expect } => {
+                assert_eq!(name, "api");
+                assert_eq!(expect.state.as_deref(), Some("running"));
+                assert!(expect.require_healthy);
+            }
+            _ => panic!("expected Docker variant"),
+        }
+    }
+
+    #[test]
+    fn docker_rejects_unknown_state() {
+        assert!("docker://api?state=warp".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn docker_rejects_unknown_query_key() {
+        assert!("docker://api?foo=bar".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn docker_display_roundtrip() {
+        let t: Target = "docker://api?state=exited".parse().unwrap();
+        assert_eq!(format!("{t}"), "docker://api?state=exited");
+        let t: Target = "docker://api?healthy=true".parse().unwrap();
+        assert_eq!(format!("{t}"), "docker://api?healthy=true");
+        let t: Target = "docker://api?state=running&healthy=true".parse().unwrap();
+        assert_eq!(format!("{t}"), "docker://api?state=running&healthy=true");
     }
 
     #[test]
