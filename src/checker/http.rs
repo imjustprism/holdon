@@ -54,6 +54,15 @@ impl TlsMin {
 pub struct HttpConfig {
     pub headers: HeaderMap,
     pub method: Method,
+    /// Disable TLS certificate verification for every HTTPS probe this
+    /// process runs.
+    ///
+    /// The setting applies process-wide because the HTTP client is
+    /// initialized once via a `OnceLock`. There is no per-target
+    /// override: enabling `insecure` on any single target disables
+    /// verification for every later HTTPS probe in the same process.
+    /// Library callers that need per-target control must run probes in
+    /// separate processes.
     pub insecure: bool,
     pub follow_redirects: bool,
     pub body_substring: Option<String>,
@@ -146,7 +155,18 @@ fn client() -> &'static Client {
                 }
             }
         }
-        b.build().unwrap_or_else(|_| Client::new())
+        // No silent fallback to Client::new(): the default client drops
+        // min_tls, custom CAs, and the client identity, which would
+        // weaken security policy invisibly. Surface the reqwest error
+        // so the user knows their flags broke the build. This is a
+        // process-fatal misconfiguration, not a per-probe failure.
+        #[allow(clippy::panic)]
+        match b.build() {
+            Ok(c) => c,
+            Err(e) => panic!(
+                "holdon: failed to build HTTP client (check --ca-cert / --client-cert / --client-key): {e}"
+            ),
+        }
     })
 }
 
