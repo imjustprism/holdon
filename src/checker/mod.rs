@@ -200,10 +200,9 @@ where
         Ok(Err(e)) => {
             let mut msg = format_error_chain(&e);
             for s in secrets {
-                if !s.is_empty() {
-                    msg = msg.replace(*s, "***");
-                }
+                msg = crate::util::redact_in(&msg, s);
             }
+            msg = crate::util::redact_userinfo(&msg);
             let h = e.hint();
             err_stage(kind, start.elapsed(), msg, h)
         }
