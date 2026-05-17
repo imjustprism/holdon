@@ -147,7 +147,7 @@ http = { version = "1.4", default-features = false, optional = true }
 serde_json = { version = "1.0", default-features = false, features = ["std"], optional = true }
 
 [dev-dependencies]
-tokio = { version = "1.41", features = ["test-util", "rt-multi-thread", "macros", "net", "time", "io-util"] }
+tokio = { version = "1.44", features = ["test-util", "rt-multi-thread", "macros", "net", "time", "io-util"] }
 tempfile = "3.27"
 proptest = { version = "1.11", default-features = false, features = ["std"] }
 assert_cmd = "2.0"
