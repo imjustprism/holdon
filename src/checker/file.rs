@@ -6,6 +6,7 @@ use crate::diagnostic::{Stage, StageKind};
 use crate::target::FileMode;
 use crate::util::format_error_chain;
 
+#[cfg_attr(not(feature = "notify-fs"), allow(clippy::unused_async))]
 pub(super) async fn probe(path: &Path, mode: FileMode, ctx: AttemptCtx) -> Vec<Stage> {
     let start = Instant::now();
     if let Some(stage) = stat_once(path, mode, start) {
