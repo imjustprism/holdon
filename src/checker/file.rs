@@ -6,10 +6,9 @@ use crate::diagnostic::{Stage, StageKind};
 use crate::target::FileMode;
 use crate::util::format_error_chain;
 
-#[cfg_attr(not(feature = "notify-fs"), allow(clippy::unused_async))]
 pub(super) async fn probe(path: &Path, mode: FileMode, ctx: AttemptCtx) -> Vec<Stage> {
     let start = Instant::now();
-    if let Some(stage) = stat_once(path, mode, start) {
+    if let Some(stage) = stat_once(path, mode, start).await {
         return vec![stage];
     }
     // Initial state did not match. With the notify-fs feature, register an
@@ -29,8 +28,8 @@ pub(super) async fn probe(path: &Path, mode: FileMode, ctx: AttemptCtx) -> Vec<S
     vec![not_matched(path, mode, start)]
 }
 
-fn stat_once(path: &Path, mode: FileMode, start: Instant) -> Option<Stage> {
-    match std::fs::symlink_metadata(path) {
+async fn stat_once(path: &Path, mode: FileMode, start: Instant) -> Option<Stage> {
+    match tokio::fs::symlink_metadata(path).await {
         Ok(_) => match mode {
             FileMode::Present => Some(ok_stage(StageKind::File, start.elapsed())),
             FileMode::Absent => None,
@@ -75,9 +74,14 @@ async fn wait_for_event(
         return None;
     }
     let target_file_name = path.file_name()?.to_owned();
-    let (tx, mut rx) = mpsc::unbounded_channel::<notify::Result<notify::Event>>();
+    // Bounded channel so a busy parent directory cannot accumulate
+    // unbounded notify events while we wait for the matching one.
+    // try_send drops the oldest excess events, which is the right
+    // behaviour for a readiness probe: we only need the next relevant
+    // event, not the entire backlog.
+    let (tx, mut rx) = mpsc::channel::<notify::Result<notify::Event>>(64);
     let mut watcher: RecommendedWatcher = match notify::recommended_watcher(move |res| {
-        let _ = tx.send(res);
+        let _ = tx.try_send(res);
     }) {
         Ok(w) => w,
         Err(_) => return None,
@@ -88,7 +92,7 @@ async fn wait_for_event(
 
     // Re-stat after registering. Closes the race where the file changed
     // state between the first stat and the watcher being armed.
-    if let Some(stage) = stat_once(path, mode, start) {
+    if let Some(stage) = stat_once(path, mode, start).await {
         return Some(vec![stage]);
     }
 
@@ -104,16 +108,20 @@ async fn wait_for_event(
             if !relevant {
                 continue;
             }
+            // Atomic-create via `mv tmpfile target` shows up as
+            // EventKind::Rename on Linux (IN_MOVED_TO) and macOS, so
+            // Rename counts as a create here for FileMode::Present.
+            // FileMode::Absent only cares about Remove and the
+            // "rename away" direction, which notify reports as
+            // Rename(RenameMode::From) with the original path. The
+            // re-stat below decides authoritatively.
             let matches = match event.kind {
-                EventKind::Create(_) | EventKind::Modify(_) => want_create,
+                EventKind::Create(_) | EventKind::Modify(_) | EventKind::Rename(_) => want_create,
                 EventKind::Remove(_) => !want_create,
                 _ => false,
             };
             if matches {
-                // Confirm via stat. notify can emit a Modify event for
-                // an unrelated change, so the event alone is not
-                // authoritative.
-                if let Some(stage) = stat_once(path, mode, start) {
+                if let Some(stage) = stat_once(path, mode, start).await {
                     return Some(stage);
                 }
             }
