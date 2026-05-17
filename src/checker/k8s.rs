@@ -183,10 +183,16 @@ fn check_job(v: &serde_json::Value) -> Result<(), ProbeError> {
 }
 
 fn check_condition(v: &serde_json::Value, want: &str, label: &str) -> Result<(), ProbeError> {
+    // Kubernetes only populates .status.conditions once at least one
+    // terminal-ish condition (Ready, Available, Complete, Failed) is set.
+    // A freshly created Job in particular returns an empty status object
+    // until pods start. Surfacing this as NotReady is accurate for all
+    // three resource kinds, where Protocol would mislead the user into
+    // looking for an API server problem.
     let conditions = v
         .pointer("/status/conditions")
         .and_then(|c| c.as_array())
-        .ok_or_else(|| ProbeError::Protocol(format!("{label} has no .status.conditions array")))?;
+        .ok_or_else(|| ProbeError::NotReady(format!("{label} has no `.status.conditions` yet")))?;
     for cond in conditions {
         let Some(ct) = cond.get("type").and_then(|t| t.as_str()) else {
             continue;
