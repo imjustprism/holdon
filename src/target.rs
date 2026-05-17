@@ -982,32 +982,7 @@ fn parse_err(input: &str, reason: &str) -> Error {
 /// their `Display` output, so any leak there ends up in stderr, logs, and
 /// any tracing span that captures the error chain.
 fn scrub_target_input(input: &str) -> String {
-    scrub_query_secrets(&scrub_userinfo_password(input))
-}
-
-/// Replace `scheme://user:password@` with `scheme://***:***@`. Username-only
-/// authorities (`scheme://user@`) and URLs without an authority component
-/// are returned untouched.
-fn scrub_userinfo_password(input: &str) -> String {
-    let Some(scheme_end) = input.find("://") else {
-        return input.to_owned();
-    };
-    let prefix_end = scheme_end + 3;
-    let rest = &input[prefix_end..];
-    let segment_end = rest.find('/').unwrap_or(rest.len());
-    let authority = &rest[..segment_end];
-    let Some(at) = authority.rfind('@') else {
-        return input.to_owned();
-    };
-    if !authority[..at].contains(':') {
-        return input.to_owned();
-    }
-    format!(
-        "{}://***:***@{}{}",
-        &input[..scheme_end],
-        &authority[at + 1..],
-        &rest[segment_end..]
-    )
+    scrub_query_secrets(&crate::util::redact_userinfo(input))
 }
 
 fn scrub_query_secrets(input: &str) -> String {
