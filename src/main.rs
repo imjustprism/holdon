@@ -524,6 +524,15 @@ async fn watch_loop(
     if last_ready.len() != targets.len() {
         last_ready.resize(targets.len(), true);
     }
+    if interval.is_zero() {
+        // tokio::time::interval panics on a zero period. Refuse cleanly
+        // instead of crashing the process.
+        let _ = writeln!(
+            std::io::stderr(),
+            "holdon: --watch-interval must be greater than zero"
+        );
+        return;
+    }
     let _ = writeln!(
         std::io::stderr(),
         "holdon: watch mode, interval={}s (Ctrl-C to exit)",
