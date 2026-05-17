@@ -1080,7 +1080,10 @@ mod tests {
         let err = "evil\u{009b}host:80".parse::<Target>().unwrap_err();
         let msg = err.to_string();
         assert!(!msg.contains('\u{009b}'), "raw C1 still in: {msg}");
-        assert!(msg.contains('\u{fffd}'), "expected replacement char in: {msg}");
+        assert!(
+            msg.contains('\u{fffd}'),
+            "expected replacement char in: {msg}"
+        );
     }
 
     #[test]
