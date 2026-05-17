@@ -199,9 +199,11 @@ where
         Ok(Ok(_)) => ok_stage(kind, start.elapsed()),
         Ok(Err(e)) => {
             let mut msg = format_error_chain(&e);
-            for s in secrets {
-                if !s.is_empty() {
-                    msg = msg.replace(*s, "***");
+            if secrets.is_empty() {
+                msg = crate::util::redact_userinfo(&msg);
+            } else {
+                for s in secrets {
+                    msg = crate::util::redact_in(&msg, s);
                 }
             }
             let h = e.hint();

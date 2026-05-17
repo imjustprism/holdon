@@ -104,6 +104,7 @@ owo-colors = { version = "4.3", default-features = false, features = ["supports-
 crossterm = { version = "0.29", default-features = false, features = ["windows"] }
 fastrand = { version = "2.4", default-features = false, features = ["std"] }
 url = { version = "2.5", default-features = false, features = ["std"] }
+percent-encoding = { version = "2.3", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["std", "attributes"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt"] }
 serde = { version = "1.0", default-features = false, features = ["std", "derive"] }

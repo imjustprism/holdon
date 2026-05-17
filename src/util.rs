@@ -35,9 +35,56 @@ pub fn sanitize_for_terminal(s: &str) -> String {
 #[must_use]
 pub fn redact_in(text: &str, secret: &str) -> String {
     if secret.is_empty() {
-        return text.to_owned();
+        return redact_userinfo(text);
     }
-    text.replace(secret, "***")
+    let decoded = percent_encoding::percent_decode_str(secret)
+        .decode_utf8()
+        .ok();
+    let mut out = text.replace(secret, "***");
+    if let Some(d) = decoded.as_deref() {
+        if d != secret {
+            out = out.replace(d, "***");
+        }
+    }
+    redact_userinfo(&out)
+}
+
+/// Replace any `scheme://user:password@` URL userinfo with `scheme://***:***@`.
+///
+/// Defense in depth: catches password leaks even when the secret string is
+/// not known to the caller (e.g. a driver echoes a percent-decoded form, or
+/// a different secret slips through).
+#[must_use]
+pub fn redact_userinfo(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    let bytes = text.as_bytes();
+    while let Some(rel) = text[cursor..].find("://") {
+        let scheme_end = cursor + rel + 3;
+        out.push_str(&text[cursor..scheme_end]);
+        let segment_end = bytes[scheme_end..]
+            .iter()
+            .position(|&b| matches!(b, b' ' | b'\t' | b'\n' | b'"' | b'\'' | b'<' | b'>'))
+            .map_or(text.len(), |off| scheme_end + off);
+        let segment = &text[scheme_end..segment_end];
+        let host_start = segment.find('/').unwrap_or(segment.len());
+        let authority = &segment[..host_start];
+        if let Some(at) = authority.rfind('@') {
+            if authority[..at].contains(':') {
+                out.push_str("***:***@");
+            } else {
+                out.push_str(&authority[..at]);
+                out.push('@');
+            }
+            out.push_str(&authority[at + 1..]);
+            out.push_str(&segment[host_start..]);
+        } else {
+            out.push_str(segment);
+        }
+        cursor = segment_end;
+    }
+    out.push_str(&text[cursor..]);
+    out
 }
 
 #[must_use]
@@ -156,6 +203,44 @@ mod tests {
     fn redact_replaces_secret() {
         assert_eq!(redact_in("user:hunter2@host", "hunter2"), "user:***@host");
         assert_eq!(redact_in("none", ""), "none");
+    }
+
+    #[test]
+    fn redact_userinfo_strips_password_in_url() {
+        assert_eq!(
+            redact_userinfo("connect failed at postgres://u:p@h:5432/db now"),
+            "connect failed at postgres://***:***@h:5432/db now"
+        );
+    }
+
+    #[test]
+    fn redact_userinfo_keeps_username_only() {
+        assert_eq!(
+            redact_userinfo("mongodb://user@h/admin"),
+            "mongodb://user@h/admin"
+        );
+    }
+
+    #[test]
+    fn redact_userinfo_no_op_without_authority() {
+        assert_eq!(redact_userinfo("plain text"), "plain text");
+        assert_eq!(redact_userinfo("/path/only"), "/path/only");
+    }
+
+    #[test]
+    fn redact_userinfo_handles_multiple_urls() {
+        let s = "from postgres://u:p@a/b to redis://x:y@c";
+        assert_eq!(
+            redact_userinfo(s),
+            "from postgres://***:***@a/b to redis://***:***@c"
+        );
+    }
+
+    #[test]
+    fn redact_in_decodes_percent_encoded_password() {
+        let raw = "p%40ss";
+        let leaked = "error: auth as 'p@ss' failed";
+        assert_eq!(redact_in(leaked, raw), "error: auth as '***' failed");
     }
 
     #[test]
