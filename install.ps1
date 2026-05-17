@@ -52,13 +52,16 @@ try {
         $pemPath = Join-Path $Tmp 'SHA256SUMS.pem'
         Invoke-WebRequest -Uri "$Base/SHA256SUMS.sig" -OutFile $sigPath -UseBasicParsing
         Invoke-WebRequest -Uri "$Base/SHA256SUMS.pem" -OutFile $pemPath -UseBasicParsing
-        $identity = "https://github.com/$Repo/.github/workflows/release.yml@refs/tags/v.*"
+        $identity = "https://github\.com/$Repo/\.github/workflows/release\.yml@refs/tags/v.*"
+        # Direct redirection (not | Out-Null). On Windows PowerShell 5.x,
+        # piping a native exe through Out-Null resets $LASTEXITCODE to 0,
+        # which would silently bypass this entire check.
         & cosign verify-blob `
             --certificate $pemPath `
             --signature $sigPath `
             --certificate-identity-regexp $identity `
             --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' `
-            $sumsPath 2>$null | Out-Null
+            $sumsPath >$null 2>&1
         if ($LASTEXITCODE -ne 0) {
             throw 'cosign signature verification failed for SHA256SUMS'
         }

@@ -75,13 +75,14 @@ main() {
     if command -v cosign >/dev/null 2>&1; then
         curl -fsSL -o "${tmp}/SHA256SUMS.sig" "${base}/SHA256SUMS.sig"
         curl -fsSL -o "${tmp}/SHA256SUMS.pem" "${base}/SHA256SUMS.pem"
-        if ! cosign verify-blob \
+        if ! cosign_out="$(cosign verify-blob \
             --certificate "${tmp}/SHA256SUMS.pem" \
             --signature "${tmp}/SHA256SUMS.sig" \
             --certificate-identity-regexp "https://github\\.com/${REPO}/\\.github/workflows/release\\.yml@refs/tags/v.*" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-            "${tmp}/SHA256SUMS" >/dev/null 2>&1; then
+            "${tmp}/SHA256SUMS" 2>&1)"; then
             echo "install: cosign signature verification failed for SHA256SUMS" >&2
+            echo "$cosign_out" >&2
             exit 1
         fi
         echo "install: SHA256SUMS cosign signature verified"
