@@ -121,7 +121,7 @@ fn parse_durations(raw: ConfigFile, path: &Path) -> Result<Resolved> {
                 i = i + 1
             );
         }
-        if entry.name.as_deref().is_some_and(str::is_empty) {
+        if entry.name.as_deref().is_some_and(|s| s.trim().is_empty()) {
             bail!(
                 "{}: [[check]] #{i} has an empty name (omit the field or set a value)",
                 path.display(),
@@ -194,6 +194,14 @@ mod tests {
     #[test]
     fn empty_check_name_rejected() {
         let err = parse("[[check]]\nname = \"\"\ntarget = \":1\"\n")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("empty name"), "got: {err}");
+    }
+
+    #[test]
+    fn whitespace_only_check_name_rejected() {
+        let err = parse("[[check]]\nname = \"   \"\ntarget = \":1\"\n")
             .unwrap_err()
             .to_string();
         assert!(err.contains("empty name"), "got: {err}");
