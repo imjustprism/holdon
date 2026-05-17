@@ -11,10 +11,11 @@ const HOSTNAME_MAX_LEN: usize = 253;
 /// A validated hostname or IP literal.
 ///
 /// Rejects empty strings, inputs over 253 bytes (RFC 1035 §2.3.4), and any
-/// control bytes (`< 0x20`) or DEL (`0x7F`). Does not enforce DNS label syntax
-/// beyond length and control-byte rejection because the same type is used for
-/// IPv4 / IPv6 literals and DNS-only targets where the user intentionally
-/// passes an unusual hostname. The OS resolver makes the final call.
+/// Unicode control character (C0 0x00-0x1F, DEL 0x7F, and C1 0x80-0x9F).
+/// Does not enforce DNS label syntax beyond length and control rejection
+/// because the same type is used for IPv4 / IPv6 literals and DNS-only
+/// targets where the user intentionally passes an unusual hostname. The OS
+/// resolver makes the final call.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Hostname(Box<str>);
 
@@ -27,8 +28,12 @@ impl Hostname {
         if s.len() > HOSTNAME_MAX_LEN {
             return Err(parse_err(&s, "hostname exceeds 253 bytes"));
         }
-        if s.bytes().any(|b| b < 0x20 || b == 0x7f) {
-            return Err(parse_err(&s, "hostname contains control bytes"));
+        // char::is_control covers C0 (0x00-0x1F), DEL (0x7F), and C1
+        // (0x80-0x9F). The previous byte-level filter only caught C0+DEL,
+        // letting C1 characters reach the terminal where some legacy
+        // emulators still interpret them as ANSI escape introducers.
+        if s.chars().any(char::is_control) {
+            return Err(parse_err(&s, "hostname contains control characters"));
         }
         Ok(Self(s))
     }
@@ -981,8 +986,16 @@ fn parse_err(input: &str, reason: &str) -> Error {
 /// `Error::Parse` and `Error::MissingPort` both quote the offending input in
 /// their `Display` output, so any leak there ends up in stderr, logs, and
 /// any tracing span that captures the error chain.
+///
+/// The output also has every C0, DEL, and C1 control character replaced with
+/// U+FFFD so a hostile target string cannot smuggle ANSI escape sequences
+/// through the "invalid target ..." fragment that callers print verbatim.
 fn scrub_target_input(input: &str) -> String {
-    scrub_query_secrets(&crate::util::redact_userinfo(input))
+    let scrubbed = scrub_query_secrets(&crate::util::redact_userinfo(input));
+    scrubbed
+        .chars()
+        .map(|c| if c.is_control() { '\u{fffd}' } else { c })
+        .collect()
 }
 
 fn scrub_query_secrets(input: &str) -> String {
@@ -1039,6 +1052,46 @@ const fn hex_digit(b: u8) -> Option<u8> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hostname_rejects_c0_control() {
+        assert!(Hostname::new("evil\x07host").is_err());
+    }
+
+    #[test]
+    fn hostname_rejects_del() {
+        assert!(Hostname::new("evil\x7fhost").is_err());
+    }
+
+    #[test]
+    fn hostname_rejects_c1_control() {
+        // U+0085 (NEL) and U+009B (CSI) are C1 controls. Some legacy
+        // terminals interpret them like ESC[ when echoed.
+        assert!(Hostname::new("evil\u{0085}host").is_err());
+        assert!(Hostname::new("evil\u{009b}host").is_err());
+    }
+
+    #[test]
+    fn parse_error_input_strips_control_chars() {
+        // The bare-host parser rejects an empty hostname before any
+        // control check could be reached, but feeding a control through a
+        // url-shaped target with a non-empty host name triggers the host
+        // validator, whose error wraps the user input via parse_err.
+        let err = "evil\u{009b}host:80".parse::<Target>().unwrap_err();
+        let msg = err.to_string();
+        assert!(!msg.contains('\u{009b}'), "raw C1 still in: {msg}");
+        assert!(
+            msg.contains('\u{fffd}'),
+            "expected replacement char in: {msg}"
+        );
+    }
+
+    #[test]
+    fn hostname_accepts_normal_characters() {
+        assert!(Hostname::new("db.local").is_ok());
+        assert!(Hostname::new("xn--bcher-kva.example").is_ok());
+        assert!(Hostname::new("192.168.0.1").is_ok());
+    }
 
     #[test]
     fn shorthand_port() {
