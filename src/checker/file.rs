@@ -63,32 +63,32 @@ async fn wait_for_event(
     ctx: AttemptCtx,
     start: Instant,
 ) -> Option<Vec<Stage>> {
-    use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-    use tokio::sync::mpsc;
+    use std::sync::Arc;
+
+    use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+    use tokio::sync::Notify;
     use tokio::time::timeout;
 
     let parent = path.parent().filter(|p| !p.as_os_str().is_empty())?;
     // Use the async metadata API: std::path::Path::is_dir calls the
     // sync fs::metadata syscall, which would stall the Tokio worker on
     // a slow or network-mounted filesystem.
-    let parent_is_dir = tokio::fs::metadata(parent)
-        .await
-        .map(|m| m.is_dir())
-        .unwrap_or(false);
+    let parent_is_dir = tokio::fs::metadata(parent).await.is_ok_and(|m| m.is_dir());
     if !parent_is_dir {
         // No usable directory to watch (e.g. /missing/file). Fall back
         // to the polling path.
         return None;
     }
-    let target_file_name = path.file_name()?.to_owned();
-    // Bounded channel so a busy parent directory cannot accumulate
-    // unbounded notify events while we wait for the matching one.
-    // try_send drops the oldest excess events, which is the right
-    // behaviour for a readiness probe: we only need the next relevant
-    // event, not the entire backlog.
-    let (tx, mut rx) = mpsc::channel::<notify::Result<notify::Event>>(64);
-    let mut watcher: RecommendedWatcher = match notify::recommended_watcher(move |res| {
-        let _ = tx.try_send(res);
+    // Notify coalesces multiple wakeups into one and never drops a
+    // signal as long as the consumer eventually awaits notified()
+    // again. We do not need to inspect individual events because the
+    // post-event re-stat is authoritative for both create and remove,
+    // and the cost of one extra stat per spurious wakeup is much
+    // smaller than the cost of missing the one event we care about.
+    let bell = Arc::new(Notify::new());
+    let kicker = bell.clone();
+    let mut watcher: RecommendedWatcher = match notify::recommended_watcher(move |_res| {
+        kicker.notify_one();
     }) {
         Ok(w) => w,
         Err(_) => return None,
@@ -103,36 +103,14 @@ async fn wait_for_event(
         return Some(vec![stage]);
     }
 
-    let want_create = matches!(mode, FileMode::Present);
     let deadline = ctx.attempt_timeout;
     let result = timeout(deadline, async {
-        while let Some(event) = rx.recv().await {
-            let Ok(event) = event else { continue };
-            let relevant = event.paths.iter().any(|p| {
-                p.file_name()
-                    .is_some_and(|n| n == target_file_name.as_os_str())
-            });
-            if !relevant {
-                continue;
-            }
-            // Atomic-create via `mv tmpfile target` arrives as
-            // EventKind::Modify(ModifyKind::Name(RenameMode::To)) on
-            // Linux (notify v8 folds renames under Modify, not a
-            // top-level Rename variant). The Modify arm therefore
-            // already covers IN_MOVED_TO and the rename-away
-            // direction. The re-stat below decides authoritatively.
-            let matches = match event.kind {
-                EventKind::Create(_) | EventKind::Modify(_) => want_create,
-                EventKind::Remove(_) => !want_create,
-                _ => false,
-            };
-            if matches {
-                if let Some(stage) = stat_once(path, mode, start).await {
-                    return Some(stage);
-                }
+        loop {
+            bell.notified().await;
+            if let Some(stage) = stat_once(path, mode, start).await {
+                return Some(stage);
             }
         }
-        None
     })
     .await;
     drop(watcher);
