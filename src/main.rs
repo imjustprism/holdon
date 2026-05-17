@@ -583,19 +583,39 @@ async fn watch_loop(
                         (idx, ready, target)
                     });
                 }
-                while let Some(joined) = set.join_next().await {
-                    if let Ok((idx, ready, target)) = joined {
-                        if let Some(prev) = last_ready.get_mut(idx) {
-                            if ready != *prev {
-                                let arrow = if ready { "fail -> ready" } else { "ready -> fail" };
-                                let _ = writeln!(
-                                    std::io::stderr(),
-                                    "holdon: [{idx}] {target}: {arrow}"
-                                );
-                                *prev = ready;
+                let mut aborted = false;
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = wait_interrupt(interrupted) => {
+                            // Abort outstanding probes so the user does not
+                            // wait up to attempt_timeout for the slowest one
+                            // before the process can exit.
+                            set.abort_all();
+                            aborted = true;
+                            break;
+                        }
+                        joined = set.join_next() => match joined {
+                            Some(Ok((idx, ready, target))) => {
+                                if let Some(prev) = last_ready.get_mut(idx) {
+                                    if ready != *prev {
+                                        let arrow = if ready { "fail -> ready" } else { "ready -> fail" };
+                                        let _ = writeln!(
+                                            std::io::stderr(),
+                                            "holdon: [{idx}] {target}: {arrow}"
+                                        );
+                                        *prev = ready;
+                                    }
+                                }
                             }
+                            Some(Err(_)) => {}
+                            None => break,
                         }
                     }
+                }
+                if aborted {
+                    let _ = writeln!(std::io::stderr(), "holdon: watch exiting on signal");
+                    return;
                 }
             }
         }
