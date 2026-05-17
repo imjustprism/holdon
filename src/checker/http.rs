@@ -58,7 +58,7 @@ pub struct HttpConfig {
     /// process runs.
     ///
     /// The setting applies process-wide because the HTTP client is
-    /// initialized once via a `OnceLock`. There is no per-target
+    /// initialized once via an `OnceLock`. There is no per-target
     /// override: enabling `insecure` on any single target disables
     /// verification for every later HTTPS probe in the same process.
     /// Library callers that need per-target control must run probes in
