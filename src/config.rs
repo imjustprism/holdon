@@ -41,25 +41,39 @@ pub(crate) struct Resolved {
 }
 
 pub(crate) fn load(explicit: Option<&Path>) -> Result<Resolved> {
-    let path = match explicit {
-        Some(p) => Some(p.to_path_buf()),
-        None => auto_detect(),
+    let (path, was_auto_detected) = match explicit {
+        Some(p) => (Some(p.to_path_buf()), false),
+        None => (auto_detect(), true),
     };
     let Some(path) = path else {
         return Ok(Resolved::default());
     };
     let contents = std::fs::read_to_string(&path)
         .with_context(|| format!("reading config file {}", path.display()))?;
-    let raw: ConfigFile =
-        toml::from_str(&contents).with_context(|| format!("parsing TOML in {}", path.display()))?;
+    let raw: ConfigFile = if was_auto_detected {
+        // Strip the toml crate's source-snippet from the error chain so an
+        // auto-loaded file (which the user may not have intended us to read)
+        // cannot leak its contents into our diagnostics.
+        toml::from_str(&contents)
+            .map_err(|e| anyhow::anyhow!("parsing TOML in {}: {}", path.display(), e.message()))?
+    } else {
+        toml::from_str(&contents).with_context(|| format!("parsing TOML in {}", path.display()))?
+    };
     parse_durations(raw, &path)
 }
 
+/// Look for a `holdon.toml` or `.holdon.toml` regular file in the current
+/// working directory. Symlinks are intentionally rejected so a hostile CWD
+/// cannot redirect us to read another file (for example `/etc/passwd`) and
+/// then surface its content in a parse error message.
 fn auto_detect() -> Option<PathBuf> {
     let cwd = std::env::current_dir().ok()?;
     for name in AUTO_DETECT_NAMES {
         let candidate = cwd.join(name);
-        if candidate.is_file() {
+        let Ok(meta) = std::fs::symlink_metadata(&candidate) else {
+            continue;
+        };
+        if meta.file_type().is_file() {
             return Some(candidate);
         }
     }
