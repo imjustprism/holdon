@@ -7,7 +7,7 @@ use tokio::time::timeout;
 use super::hint::hints;
 use super::{AttemptCtx, Hintable, err_stage, ok_stage};
 use crate::diagnostic::{Stage, StageKind};
-use crate::util::format_error_chain;
+use crate::util::{format_error_chain, sanitize_for_terminal};
 
 const TCP_STAGE_COUNT: usize = 2;
 const TCP_REMAINING_FLOOR: Duration = Duration::from_millis(50);
@@ -46,7 +46,7 @@ pub(super) async fn probe(host: &str, port: u16, ctx: AttemptCtx) -> Vec<Stage> 
             stages.push(err_stage(
                 StageKind::Dns,
                 dns_start.elapsed(),
-                format!("resolver task: {e}"),
+                sanitize_for_terminal(&format!("resolver task: {e}")),
                 None,
             ));
             return stages;

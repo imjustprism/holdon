@@ -601,7 +601,7 @@ impl FromStr for Target {
                 if !rest.starts_with("//") {
                     let (host, port) = rest
                         .rsplit_once(':')
-                        .ok_or_else(|| Error::MissingPort(input.into()))?;
+                        .ok_or_else(|| Error::MissingPort(scrub_target_input(input)))?;
                     let port = parse_port(port, input)?;
                     return Ok(Self::Tcp {
                         host: Hostname::new(host)?,
@@ -617,7 +617,7 @@ impl FromStr for Target {
             }
             let (host, port) = input
                 .rsplit_once(':')
-                .ok_or_else(|| Error::MissingPort(input.into()))?;
+                .ok_or_else(|| Error::MissingPort(scrub_target_input(input)))?;
             let port = parse_port(port, input)?;
             return Ok(Self::Tcp {
                 host: Hostname::new(host)?,
@@ -631,7 +631,9 @@ impl FromStr for Target {
                 let host = url
                     .host_str()
                     .ok_or_else(|| parse_err(input, "missing host"))?;
-                let port = url.port().ok_or_else(|| Error::MissingPort(input.into()))?;
+                let port = url
+                    .port()
+                    .ok_or_else(|| Error::MissingPort(scrub_target_input(input)))?;
                 Ok(Self::Tcp {
                     host: Hostname::new(host)?,
                     port,
@@ -665,7 +667,8 @@ impl FromStr for Target {
                     .host_str()
                     .ok_or_else(|| parse_err(input, "missing host"))?;
                 Hostname::new(host)?;
-                url.port().ok_or_else(|| Error::MissingPort(input.into()))?;
+                url.port()
+                    .ok_or_else(|| Error::MissingPort(scrub_target_input(input)))?;
                 if url.query().is_some() {
                     return Err(parse_err(
                         input,
@@ -679,7 +682,8 @@ impl FromStr for Target {
                     .host_str()
                     .ok_or_else(|| parse_err(input, "missing host"))?;
                 Hostname::new(host)?;
-                url.port().ok_or_else(|| Error::MissingPort(input.into()))?;
+                url.port()
+                    .ok_or_else(|| Error::MissingPort(scrub_target_input(input)))?;
                 let mut topic: Option<String> = None;
                 let mut min_partitions: Option<u32> = None;
                 for (k, v) in url.query_pairs() {
@@ -770,7 +774,7 @@ impl FromStr for Target {
                     .ok_or_else(|| parse_err(input, "missing host"))?;
                 Hostname::new(host)?;
                 url.port_or_known_default()
-                    .ok_or_else(|| Error::MissingPort(input.into()))?;
+                    .ok_or_else(|| Error::MissingPort(scrub_target_input(input)))?;
                 for (k, v) in url.query_pairs() {
                     if k.eq_ignore_ascii_case("expect-version") {
                         if v.as_ref() != "1" && v.as_ref() != "2" && v.as_ref() != "3" {
@@ -802,7 +806,7 @@ impl FromStr for Target {
                     .ok_or_else(|| parse_err(input, "missing host"))?;
                 Hostname::new(host)?;
                 url.port_or_known_default()
-                    .ok_or_else(|| Error::MissingPort(input.into()))?;
+                    .ok_or_else(|| Error::MissingPort(scrub_target_input(input)))?;
                 let raw = url.path().trim_start_matches('/').trim_end_matches('/');
                 let service = if raw.is_empty() {
                     String::new()
@@ -966,9 +970,44 @@ fn parse_port(s: &str, input: &str) -> Result<u16> {
 
 fn parse_err(input: &str, reason: &str) -> Error {
     Error::Parse {
-        input: scrub_query_secrets(input),
+        input: scrub_target_input(input),
         reason: reason.into(),
     }
+}
+
+/// Scrub URL userinfo password and well-known secret query parameters from
+/// a user-supplied target string before embedding it in an `Error` variant.
+///
+/// `Error::Parse` and `Error::MissingPort` both quote the offending input in
+/// their `Display` output, so any leak there ends up in stderr, logs, and
+/// any tracing span that captures the error chain.
+fn scrub_target_input(input: &str) -> String {
+    scrub_query_secrets(&scrub_userinfo_password(input))
+}
+
+/// Replace `scheme://user:password@` with `scheme://***:***@`. Username-only
+/// authorities (`scheme://user@`) and URLs without an authority component
+/// are returned untouched.
+fn scrub_userinfo_password(input: &str) -> String {
+    let Some(scheme_end) = input.find("://") else {
+        return input.to_owned();
+    };
+    let prefix_end = scheme_end + 3;
+    let rest = &input[prefix_end..];
+    let segment_end = rest.find('/').unwrap_or(rest.len());
+    let authority = &rest[..segment_end];
+    let Some(at) = authority.rfind('@') else {
+        return input.to_owned();
+    };
+    if !authority[..at].contains(':') {
+        return input.to_owned();
+    }
+    format!(
+        "{}://***:***@{}{}",
+        &input[..scheme_end],
+        &authority[at + 1..],
+        &rest[segment_end..]
+    )
 }
 
 fn scrub_query_secrets(input: &str) -> String {
