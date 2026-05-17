@@ -108,6 +108,12 @@ pub(crate) mod hints {
     pub(crate) const KAFKA_TLS: &str =
         "tls handshake failed, check kafkas:// and CA cert configuration";
     pub(crate) const CLEARTEXT_CREDS: &str = "credentials over a non-TLS scheme would be sent in plaintext, switch to the TLS scheme (rediss://, mongodb+srv:// or mongodb://?tls=true, kafkas://, amqps://) or remove the password";
+    pub(crate) const DOCKER_NO_SOCKET: &str = "could not reach the Docker engine socket, check that the daemon is running and that DOCKER_HOST is set (or that the user has access to the default socket)";
+    pub(crate) const DOCKER_NO_SUCH: &str = "container does not exist on this daemon, check the name and whether it has been created yet";
+    pub(crate) const DOCKER_NOT_RUNNING: &str = "container exists but is not in the expected state, it may still be starting or have already exited";
+    pub(crate) const DOCKER_NO_HEALTHCHECK: &str = "container has no HEALTHCHECK defined, drop ?healthy=true or add a HEALTHCHECK to the image";
+    pub(crate) const DOCKER_UNHEALTHY: &str = "container reported unhealthy, inspect the most recent healthcheck logs with `docker inspect`";
+    pub(crate) const DOCKER_PROTOCOL: &str = "unexpected response from the Docker engine API, ensure DOCKER_HOST points at a real Docker engine";
 }
 
 impl Hintable for std::io::Error {
