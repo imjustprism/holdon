@@ -108,6 +108,23 @@ fn parse_header_pair(input: &str) -> Result<HeaderPair, String> {
     Ok(HeaderPair { name, value })
 }
 
+/// Reject webhook URLs at parse time so a typo surfaces immediately
+/// instead of after the full readiness wait completes.
+#[cfg(feature = "http")]
+fn parse_webhook_url(input: &str) -> Result<String, String> {
+    let parsed = url::Url::parse(input).map_err(|e| format!("invalid URL: {e}"))?;
+    let scheme = parsed.scheme();
+    if scheme != "http" && scheme != "https" {
+        return Err(format!(
+            "webhook scheme `{scheme}` not supported, expected http or https"
+        ));
+    }
+    if parsed.host().is_none() {
+        return Err("webhook URL has no host".into());
+    }
+    Ok(input.to_owned())
+}
+
 #[cfg(feature = "http")]
 #[derive(Debug, Clone)]
 pub(crate) struct HeaderExpectation {
@@ -248,19 +265,21 @@ pub(crate) struct Args {
     #[arg(long, env = "HOLDON_WATCH_INTERVAL", value_parser = holdon::parse_duration, default_value = "5s")]
     pub(crate) watch_interval: Duration,
 
-    /// POST a JSON summary to this URL once every target is ready.
+    /// POST a JSON summary to this URL once the run's success condition
+    /// is met (every target ready, or `--at-least N` satisfied if set).
     /// Body has an `event` field (`ready` or `fail`), an `elapsed_ms`
     /// number, and a `targets` array of `{idx, target, satisfied,
     /// attempts}` objects. Webhook failures are logged to stderr but
     /// never affect the exit code.
     #[cfg(feature = "http")]
-    #[arg(long, env = "HOLDON_ON_READY", value_name = "URL")]
+    #[arg(long, env = "HOLDON_ON_READY", value_name = "URL", value_parser = parse_webhook_url)]
     pub(crate) on_ready: Option<String>,
 
     /// POST a JSON summary to this URL when the deadline expires before
-    /// every target is ready. Same schema as --on-ready with event="fail".
+    /// the success condition is met. Same schema as --on-ready with
+    /// `event = "fail"`.
     #[cfg(feature = "http")]
-    #[arg(long, env = "HOLDON_ON_FAIL", value_name = "URL")]
+    #[arg(long, env = "HOLDON_ON_FAIL", value_name = "URL", value_parser = parse_webhook_url)]
     pub(crate) on_fail: Option<String>,
 
     /// Per-webhook timeout. Defaults to 5s.
