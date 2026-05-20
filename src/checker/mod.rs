@@ -30,6 +30,8 @@ mod mongodb;
 mod mysql;
 #[cfg(feature = "postgres")]
 mod postgres;
+#[cfg(feature = "process")]
+mod process;
 #[cfg(feature = "rabbitmq")]
 mod rabbitmq;
 #[cfg(feature = "redis")]
@@ -142,6 +144,10 @@ impl Target {
             Self::Ws { url } => websocket::probe(url, ctx).await,
             #[cfg(not(feature = "websocket"))]
             Self::Ws { .. } => disabled_stage(StageKind::Ws, "websocket"),
+            #[cfg(feature = "process")]
+            Self::Process { selector } => process::probe(selector, ctx).await,
+            #[cfg(not(feature = "process"))]
+            Self::Process { .. } => disabled_stage(StageKind::Process, "process"),
         };
         let ok = stages
             .last()

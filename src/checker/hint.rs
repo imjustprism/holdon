@@ -130,6 +130,10 @@ pub(crate) mod hints {
         "could not open TCP connection to the WebSocket endpoint, check host and port";
     pub(crate) const WS_HANDSHAKE: &str = "TCP connected but the WebSocket handshake failed, server may not speak the WebSocket protocol on this path";
     pub(crate) const WS_TLS: &str = "wss:// handshake failed, verify server cert and SNI";
+    pub(crate) const PROCESS_NO_PID: &str =
+        "no process with that pid is running yet, it may not have spawned";
+    pub(crate) const PROCESS_NO_NAME: &str =
+        "no process with that name is running yet, check spelling or wait for the launcher";
 }
 
 impl Hintable for std::io::Error {

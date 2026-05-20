@@ -77,6 +77,7 @@ pub enum StageKind {
     Docker,
     K8s,
     Ws,
+    Process,
 }
 
 /// Outcome of a single [`Stage`].
@@ -143,6 +144,7 @@ impl StageKind {
             Self::Docker => ("docker", "Docker container"),
             Self::K8s => ("k8s", "Kubernetes resource"),
             Self::Ws => ("ws", "WebSocket handshake"),
+            Self::Process => ("process", "Process readiness"),
         }
     }
 
