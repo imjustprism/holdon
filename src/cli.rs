@@ -248,6 +248,26 @@ pub(crate) struct Args {
     #[arg(long, env = "HOLDON_WATCH_INTERVAL", value_parser = holdon::parse_duration, default_value = "5s")]
     pub(crate) watch_interval: Duration,
 
+    /// POST a JSON summary to this URL once every target is ready.
+    /// Body has an `event` field (`ready` or `fail`), an `elapsed_ms`
+    /// number, and a `targets` array of `{idx, target, satisfied,
+    /// attempts}` objects. Webhook failures are logged to stderr but
+    /// never affect the exit code.
+    #[cfg(feature = "http")]
+    #[arg(long, env = "HOLDON_ON_READY", value_name = "URL")]
+    pub(crate) on_ready: Option<String>,
+
+    /// POST a JSON summary to this URL when the deadline expires before
+    /// every target is ready. Same schema as --on-ready with event="fail".
+    #[cfg(feature = "http")]
+    #[arg(long, env = "HOLDON_ON_FAIL", value_name = "URL")]
+    pub(crate) on_fail: Option<String>,
+
+    /// Per-webhook timeout. Defaults to 5s.
+    #[cfg(feature = "http")]
+    #[arg(long, env = "HOLDON_WEBHOOK_TIMEOUT", value_parser = holdon::parse_duration, default_value = "5s")]
+    pub(crate) webhook_timeout: Duration,
+
     #[arg(long, env = "HOLDON_TIMEOUT_EXIT_CODE", default_value_t = crate::DEFAULT_TIMEOUT_EXIT_CODE)]
     pub(crate) timeout_exit_code: u8,
 

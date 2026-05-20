@@ -322,6 +322,18 @@ async fn run(args: Args) -> Result<ExitStatus> {
         report.all_ready()
     };
 
+    #[cfg(feature = "http")]
+    {
+        let url = if ready {
+            args.on_ready.as_deref()
+        } else {
+            args.on_fail.as_deref()
+        };
+        if let Some(url) = url {
+            fire_webhook(url, ready, &report, args.webhook_timeout).await;
+        }
+    }
+
     if args.watch && !ready {
         eprintln!("holdon: --watch skipped: not all targets became ready");
     } else if args.watch {
@@ -575,6 +587,55 @@ fn install_panic_hook() {
         let _ = crossterm::execute!(std::io::stderr(), crossterm::cursor::Show);
         prev(info);
     }));
+}
+
+/// POST a JSON summary of the final run state to the operator-supplied
+/// URL. Best-effort: any failure (DNS, TCP, TLS, HTTP error, timeout)
+/// is logged to stderr and never affects the exit code, so a hook URL
+/// outage cannot block a deploy script that uses holdon as a gate.
+///
+/// The body is a small fixed schema deliberately separate from the
+/// `--output json` event stream, because JSON-output consumers and
+/// webhook receivers usually want different shapes.
+#[cfg(feature = "http")]
+async fn fire_webhook(url: &str, ready: bool, report: &holdon::Report, timeout: Duration) {
+    use serde_json::json;
+    let body = json!({
+        "event": if ready { "ready" } else { "fail" },
+        "elapsed_ms": u64::try_from(report.elapsed.as_millis()).unwrap_or(u64::MAX),
+        "targets": report.results.iter().map(|r| json!({
+            "idx": r.idx,
+            "target": r.target.to_string(),
+            "satisfied": r.satisfied,
+            "attempts": r.attempts,
+        })).collect::<Vec<_>>(),
+    });
+    let client = match reqwest::Client::builder()
+        .user_agent(concat!("holdon/", env!("CARGO_PKG_VERSION")))
+        .timeout(timeout)
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("holdon: webhook client build failed: {e}");
+            return;
+        }
+    };
+    let request = client
+        .post(url)
+        .header("content-type", "application/json")
+        .body(body.to_string());
+    match request.send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            if !status.is_success() {
+                eprintln!("holdon: webhook {url} returned {status}");
+            }
+        }
+        Err(e) => {
+            eprintln!("holdon: webhook {url} failed: {e}");
+        }
+    }
 }
 
 /// Continuously re-probe every target on a fixed interval and write a

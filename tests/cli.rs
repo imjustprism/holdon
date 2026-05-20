@@ -47,6 +47,18 @@ fn help_lists_watch_flags() {
         .stdout(predicate::str::contains("--watch-interval"));
 }
 
+#[cfg(feature = "http")]
+#[test]
+fn help_lists_webhook_flags() {
+    cmd()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--on-ready"))
+        .stdout(predicate::str::contains("--on-fail"))
+        .stdout(predicate::str::contains("--webhook-timeout"));
+}
+
 #[test]
 fn no_args_fails_with_misuse() {
     cmd().assert().code(2);
