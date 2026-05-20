@@ -174,7 +174,16 @@ targets = [
   "tcp://db:5432",
   "https://api.local/health",
 ]
+
+[[check]]
+name = "slow database"
+target = "postgres://db:5432"
+interval = "1s"
+attempt_timeout = "15s"
+success_threshold = 3
 ```
+
+Per-`[[check]]` `interval`, `attempt_timeout`, and `success_threshold` override the global value for that one target. Omitted fields inherit the global setting.
 
 Explicit CLI flags always win over the config file. See [`examples/holdon.toml`](https://github.com/imjustprism/holdon/tree/main/examples/holdon.toml).
 

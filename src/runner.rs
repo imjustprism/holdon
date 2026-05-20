@@ -73,6 +73,32 @@ pub struct RunnerConfig {
     /// entries beyond the targets vec are silently truncated, missing
     /// entries fall back to the global `direction`.
     pub directions: Option<Vec<Direction>>,
+    /// Optional per-target overrides for retry-loop timing knobs. When
+    /// set, index `i` carries optional overrides for the target at
+    /// position `i`. Each [`TargetOverrides`] field is independent, so a
+    /// caller can override `attempt_timeout` for one target while
+    /// leaving `interval` and `success_threshold` at their globals.
+    pub overrides: Option<Vec<TargetOverrides>>,
+}
+
+/// Per-target overrides for retry-loop timing knobs.
+///
+/// Each field is optional. `None` means "inherit the global value from
+/// [`RunnerConfig`]". `Some(_)` replaces that single field for the
+/// target at the matching index.
+///
+/// The struct is `#[non_exhaustive]`. New per-target knobs can land
+/// without breaking external pattern matches.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct TargetOverrides {
+    /// Initial retry interval applied before backoff doubling. Floors
+    /// to [`RunnerConfig::MIN_INTERVAL`] just like the global setting.
+    pub interval: Option<Duration>,
+    /// Per-attempt wall-clock budget for one probe.
+    pub attempt_timeout: Option<Duration>,
+    /// Consecutive-success threshold. Values < 1 are clamped to 1.
+    pub success_threshold: Option<u32>,
 }
 
 impl RunnerConfig {
@@ -139,6 +165,7 @@ impl Default for RunnerConfig {
             success_threshold: Self::DEFAULT_SUCCESS_THRESHOLD,
             jitter: true,
             directions: None,
+            overrides: None,
         }
     }
 }
@@ -209,6 +236,16 @@ impl RunnerConfig {
     #[must_use]
     pub fn directions(mut self, v: Option<Vec<Direction>>) -> Self {
         self.directions = v;
+        self
+    }
+
+    /// Set per-target retry-loop overrides. The slice index aligns with
+    /// the targets vec passed to [`Runner::run`]. Pass `None` (or
+    /// per-entry `None` fields) to inherit the global values for each
+    /// knob.
+    #[must_use]
+    pub fn overrides(mut self, v: Option<Vec<TargetOverrides>>) -> Self {
+        self.overrides = v;
         self
     }
 }
@@ -341,13 +378,29 @@ impl Runner {
                 .and_then(|v| v.get(idx).copied())
                 .unwrap_or(self.cfg.direction)
         };
+        let pick_overrides = |idx: usize| -> TargetOverrides {
+            self.cfg
+                .overrides
+                .as_ref()
+                .and_then(|v| v.get(idx).cloned())
+                .unwrap_or_default()
+        };
 
         if matches!(self.cfg.schedule, Schedule::Sequential) {
             let mut results = Vec::with_capacity(targets.len());
             for (idx, target) in targets.into_iter().enumerate() {
                 let dir = pick_direction(idx);
-                let r =
-                    run_single(idx, target, self.cfg.clone(), dir, deadline, sink.as_ref()).await;
+                let ov = pick_overrides(idx);
+                let r = run_single(
+                    idx,
+                    target,
+                    self.cfg.clone(),
+                    dir,
+                    ov,
+                    deadline,
+                    sink.as_ref(),
+                )
+                .await;
                 results.push(r);
             }
             return Report {
@@ -361,8 +414,11 @@ impl Runner {
         for (idx, target) in targets.into_iter().enumerate() {
             let cfg = self.cfg.clone();
             let dir = pick_direction(idx);
+            let ov = pick_overrides(idx);
             let s = sink.clone();
-            set.spawn(async move { run_single(idx, target, cfg, dir, deadline, s.as_ref()).await });
+            set.spawn(
+                async move { run_single(idx, target, cfg, dir, ov, deadline, s.as_ref()).await },
+            );
         }
 
         let mut results = Vec::with_capacity(target_count);
@@ -388,15 +444,20 @@ async fn run_single(
     target: Target,
     cfg: RunnerConfig,
     direction: Direction,
+    overrides: TargetOverrides,
     deadline: Instant,
     sink: Option<&EventSink>,
 ) -> TargetReport {
     let attempt_ctx = AttemptCtx {
-        attempt_timeout: cfg.attempt_timeout,
+        attempt_timeout: overrides.attempt_timeout.unwrap_or(cfg.attempt_timeout),
     };
-    let mut interval = cfg.initial_interval.max(RunnerConfig::MIN_INTERVAL);
+    let initial_interval = overrides.interval.unwrap_or(cfg.initial_interval);
+    let mut interval = initial_interval.max(RunnerConfig::MIN_INTERVAL);
     let max_interval = cfg.max_interval.max(RunnerConfig::MIN_INTERVAL);
-    let threshold = cfg.success_threshold.max(1);
+    let threshold = overrides
+        .success_threshold
+        .unwrap_or(cfg.success_threshold)
+        .max(1);
     let mut attempts: u32 = 0;
     let mut consecutive_ok: u32 = 0;
 

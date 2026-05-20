@@ -174,6 +174,67 @@ async fn once_makes_exactly_one_attempt() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn per_target_attempt_timeout_overrides_global() {
+    let port_slow = free_port().await;
+    let (l_open, port_open) = bind_ephemeral().await;
+    // Keep the listener alive for the whole run.
+    let _open = Box::leak(Box::new(l_open));
+    let targets: Vec<Target> = [port_slow, port_open]
+        .iter()
+        .map(|p| format!("127.0.0.1:{p}").parse().unwrap())
+        .collect();
+    // Globally long attempt timeout, but the closed port gets a 50ms override.
+    // If the override is honoured, the failing target finishes long before the
+    // global 2s budget could expire it.
+    let mut ov_short = holdon::TargetOverrides::default();
+    ov_short.attempt_timeout = Some(Duration::from_millis(50));
+    let overrides = vec![ov_short, holdon::TargetOverrides::default()];
+    let cfg = RunnerConfig::default()
+        .timeout(Duration::from_secs(1))
+        .attempt_timeout(Duration::from_secs(2))
+        .once(true)
+        .overrides(Some(overrides));
+    let start = Instant::now();
+    let report = Runner::new(cfg).run(targets, None).await;
+    let elapsed = start.elapsed();
+    assert!(!report.results[0].satisfied);
+    assert!(report.results[1].satisfied);
+    assert!(
+        elapsed < Duration::from_millis(800),
+        "per-target attempt_timeout not honoured, elapsed={elapsed:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn per_target_success_threshold_overrides_global() {
+    let (_l, p) = bind_ephemeral().await;
+    let target: Target = format!("127.0.0.1:{p}").parse().unwrap();
+    let mut ov = holdon::TargetOverrides::default();
+    ov.success_threshold = Some(3);
+    ov.interval = Some(Duration::from_millis(5));
+    let cfg = RunnerConfig::default()
+        .timeout(Duration::from_secs(3))
+        .attempt_timeout(Duration::from_millis(200))
+        .success_threshold(1)
+        .jitter(false)
+        .overrides(Some(vec![ov]));
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let handle = tokio::spawn(Runner::new(cfg).run(vec![target], Some(tx)));
+    let mut attempts = 0u32;
+    while let Some(ev) = rx.recv().await {
+        if matches!(ev, Event::Attempt { .. }) {
+            attempts += 1;
+        }
+    }
+    let report = handle.await.unwrap();
+    assert!(report.all_ready());
+    assert!(
+        attempts >= 3,
+        "expected >=3 attempts to satisfy threshold, got {attempts}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn assert_all_ready_returns_not_ready_error() {
     let port = free_port().await;
     let target: Target = format!("127.0.0.1:{port}").parse().unwrap();

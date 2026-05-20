@@ -91,6 +91,8 @@ async fn run(args: Args) -> Result<ExitStatus> {
     let mut names: Vec<Option<String>> = std::iter::repeat_n(None, raw_targets.len()).collect();
     let mut per_target_reverse: Vec<Option<bool>> =
         std::iter::repeat_n(None, raw_targets.len()).collect();
+    let mut per_target_overrides: Vec<config::PerTargetOverride> =
+        std::iter::repeat_n(config::PerTargetOverride::default(), raw_targets.len()).collect();
     // config_data.names lines up with config_data.targets entries (the
     // legacy targets array plus any [[check]] blocks, in file order).
     // Splice it in starting after the positional CLI targets.
@@ -115,6 +117,15 @@ async fn run(args: Args) -> Result<ExitStatus> {
             .enumerate()
         {
             per_target_reverse[cli_count + i] = d;
+        }
+        for (i, o) in config_data
+            .overrides_per_target
+            .iter()
+            .take(config_target_count)
+            .copied()
+            .enumerate()
+        {
+            per_target_overrides[cli_count + i] = o;
         }
     }
     let resolved_targets: Vec<String> = raw_targets
@@ -279,6 +290,25 @@ async fn run(args: Args) -> Result<ExitStatus> {
             })
             .collect();
         cfg.directions(Some(directions))
+    } else {
+        cfg
+    };
+
+    let has_any_override = per_target_overrides
+        .iter()
+        .any(config::PerTargetOverride::is_some);
+    let cfg = if has_any_override {
+        let overrides: Vec<holdon::runner::TargetOverrides> = per_target_overrides
+            .iter()
+            .map(|o| {
+                let mut t = holdon::runner::TargetOverrides::default();
+                t.interval = o.interval;
+                t.attempt_timeout = o.attempt_timeout;
+                t.success_threshold = o.success_threshold;
+                t
+            })
+            .collect();
+        cfg.overrides(Some(overrides))
     } else {
         cfg
     };
