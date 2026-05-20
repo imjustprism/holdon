@@ -98,11 +98,18 @@ fn resolve_file(path: &str) -> Result<String> {
     if path.is_empty() {
         bail!("file placeholder requires a path");
     }
-    // Open once, then stat the open file descriptor. A separate
-    // `metadata()` + `read_to_string()` pair on the path would race:
-    // an attacker with write access to the directory could swap the
-    // regular file out for a symlink to /dev/zero between the two
-    // syscalls and trap us in an unbounded read.
+    // First pass: symlink_metadata + is_file. Rejects FIFOs, sockets,
+    // character devices, directories, and symlinks before we ever call
+    // open(). On Linux/macOS open(O_RDONLY) on a FIFO blocks until a
+    // writer arrives, which would hang holdon until SIGKILL.
+    let probe = std::fs::symlink_metadata(Path::new(path))
+        .with_context(|| format!("reading secret file `{path}`"))?;
+    if !probe.is_file() {
+        bail!("secret file `{path}` is not a regular file");
+    }
+    // Second pass: open and re-stat through the fd. The TOCTOU window
+    // between the two syscalls is narrow, and a swap to a regular
+    // larger file still triggers the size cap below.
     let mut file = std::fs::File::open(Path::new(path))
         .with_context(|| format!("reading secret file `{path}`"))?;
     let metadata = file
