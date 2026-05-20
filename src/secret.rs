@@ -105,14 +105,20 @@ fn resolve_env(name: &str) -> Result<String> {
 }
 
 fn resolve_file(path: &str) -> Result<String> {
+    use std::io::Read as _;
     if path.is_empty() {
         bail!("file placeholder requires a path");
     }
-    let metadata = std::fs::metadata(Path::new(path))
+    // Open once, then stat the open file descriptor. A separate
+    // `metadata()` + `read_to_string()` pair on the path would race:
+    // an attacker with write access to the directory could swap the
+    // regular file out for a symlink to /dev/zero between the two
+    // syscalls and trap us in an unbounded read.
+    let mut file = std::fs::File::open(Path::new(path))
         .with_context(|| format!("reading secret file `{path}`"))?;
-    // Refuse character devices, pipes, sockets etc. Their reported
-    // length is 0 on Linux/macOS, which would otherwise sail past the
-    // size cap below and trap us in an unbounded read.
+    let metadata = file
+        .metadata()
+        .with_context(|| format!("reading secret file `{path}`"))?;
     if !metadata.is_file() {
         bail!("secret file `{path}` is not a regular file");
     }
@@ -123,7 +129,8 @@ fn resolve_file(path: &str) -> Result<String> {
             MAX_SECRET_FILE_BYTES
         );
     }
-    let raw = std::fs::read_to_string(Path::new(path))
+    let mut raw = String::with_capacity(usize::try_from(metadata.len()).unwrap_or(0));
+    file.read_to_string(&mut raw)
         .with_context(|| format!("reading secret file `{path}`"))?;
     // Trim a single trailing newline so a file written by `echo`
     // produces the same value the user expects to interpolate.
