@@ -256,3 +256,13 @@ fn http_method_help_lists_options() {
         .stdout(predicate::str::contains("--insecure"))
         .stdout(predicate::str::contains("-H, --header"));
 }
+
+#[cfg(feature = "http")]
+#[test]
+fn help_lists_max_rtt_flag() {
+    cmd()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--max-rtt"));
+}

@@ -314,6 +314,14 @@ pub(crate) struct Args {
     )]
     pub(crate) data: Option<String>,
 
+    /// Soft upper bound on the HTTP response time. A response that is
+    /// otherwise acceptable but slower than this is reported as
+    /// not-ready with an explicit SLA message. Separate from the hard
+    /// --attempt-timeout that also covers DNS, TCP, and TLS.
+    #[cfg(feature = "http")]
+    #[arg(long, env = "HOLDON_MAX_RTT", value_parser = holdon::parse_duration, value_name = "DUR")]
+    pub(crate) max_rtt: Option<Duration>,
+
     #[cfg(feature = "http")]
     #[arg(long, help = "Skip TLS certificate verification (dev only)")]
     pub(crate) insecure: bool,
