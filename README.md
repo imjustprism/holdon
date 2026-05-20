@@ -138,6 +138,7 @@ The argument after `--` is the command to run once every target is ready. holdon
 | `temporal://`, `temporals://`   | Temporal server gRPC `Health/Check` on `WorkflowService` |
 | `log:///path?match=...`         | Wait for a substring or regex to appear in a local log file (last 1 MiB) |
 | `exec://program?arg=...`        | External command, ready iff exit `0`      |
+| `process://<pid>`, `process://<name>` | Process exists by PID or by executable name (Windows strips `.exe`) |
 
 ## Feature flags
 
@@ -156,6 +157,7 @@ Defaults (`http` + `json-output`) cover most CI use cases. Database and message-
 | `influxdb`      | `InfluxDB` `/ping` probe (depends on `http`) |
 | `grpc`          | gRPC `Health/Check` probe via `tonic` + rustls |
 | `json-output`   | `--output json` line-delimited events      |
+| `process`       | `process://<pid\|name>` readiness via `sysinfo` |
 | `all-databases` | `postgres` + `mysql` + `redis` + `mongodb` |
 | `full`          | Everything above                           |
 

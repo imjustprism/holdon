@@ -152,6 +152,22 @@ pub enum Target {
     Ws {
         url: Url,
     },
+    Process {
+        selector: ProcessSelector,
+    },
+}
+
+/// Process readiness selector.
+///
+/// Built from `process://<pid>` or `process://<name>`. A purely numeric host
+/// component parses as `Pid`. Anything else parses as `Name`, in which case
+/// the probe scans the running process table for a match against the process
+/// executable name (extension-stripped on Windows).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ProcessSelector {
+    Pid(u32),
+    Name(String),
 }
 
 /// Kinds of Kubernetes resource that [`Target::K8s`] knows how to probe.
@@ -392,6 +408,10 @@ impl fmt::Debug for Target {
                 .field("name", name)
                 .finish(),
             Self::Ws { url } => f.debug_struct("Ws").field("url", &redact(url)).finish(),
+            Self::Process { selector } => f
+                .debug_struct("Process")
+                .field("selector", selector)
+                .finish(),
         }
     }
 }
@@ -449,6 +469,10 @@ impl fmt::Display for Target {
                     LogMatcher::Regex(re) => write!(f, "?regex={}", encode_arg(re.as_str())),
                 }
             }
+            Self::Process { selector } => match selector {
+                ProcessSelector::Pid(pid) => write!(f, "process://{pid}"),
+                ProcessSelector::Name(name) => write!(f, "process://{name}"),
+            },
         }
     }
 }
@@ -976,6 +1000,7 @@ impl FromStr for Target {
             }
             "docker" => parse_docker_target(input, &url),
             "k8s" | "kubernetes" => parse_k8s_target(input, &url),
+            "process" => parse_process_target(input, &url),
             "ws" | "wss" => {
                 let host = url
                     .host_str()
@@ -1125,6 +1150,46 @@ fn is_valid_k8s_name(s: &str) -> bool {
     bytes
         .iter()
         .all(|&b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'.')
+}
+
+fn parse_process_target(input: &str, url: &Url) -> Result<Target> {
+    let host = url
+        .host_str()
+        .ok_or_else(|| parse_err(input, "process:// requires <pid> or <name>"))?;
+    let path = url.path().trim_matches('/');
+    if !path.is_empty() {
+        return Err(parse_err(
+            input,
+            "process:// expected process://<pid> or process://<name> (no path segments)",
+        ));
+    }
+    if url.query().is_some() {
+        return Err(parse_err(
+            input,
+            "process:// does not accept query parameters",
+        ));
+    }
+    if host.is_empty() {
+        return Err(parse_err(input, "process:// selector is empty"));
+    }
+    if host.chars().any(char::is_control) {
+        return Err(parse_err(
+            input,
+            "process:// selector contains control characters",
+        ));
+    }
+    let selector = if host.chars().all(|c| c.is_ascii_digit()) {
+        let pid: u32 = host
+            .parse()
+            .map_err(|_| parse_err(input, "process:// pid out of range"))?;
+        if pid == 0 {
+            return Err(parse_err(input, "process:// pid must be positive"));
+        }
+        ProcessSelector::Pid(pid)
+    } else {
+        ProcessSelector::Name(host.to_owned())
+    };
+    Ok(Target::Process { selector })
 }
 
 fn parse_exec_target(rest: &str, input: &str) -> Result<Target> {
@@ -1445,6 +1510,51 @@ mod tests {
     #[test]
     fn docker_rejects_unknown_query_key() {
         assert!("docker://api?foo=bar".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn process_pid() {
+        let t: Target = "process://1234".parse().unwrap();
+        match t {
+            Target::Process {
+                selector: ProcessSelector::Pid(p),
+            } => assert_eq!(p, 1234),
+            _ => panic!("expected Process(Pid)"),
+        }
+    }
+
+    #[test]
+    fn process_name() {
+        let t: Target = "process://my-app".parse().unwrap();
+        match t {
+            Target::Process {
+                selector: ProcessSelector::Name(n),
+            } => assert_eq!(n, "my-app"),
+            _ => panic!("expected Process(Name)"),
+        }
+    }
+
+    #[test]
+    fn process_rejects_zero_pid() {
+        assert!("process://0".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn process_rejects_query() {
+        assert!("process://1234?foo=bar".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn process_rejects_path_segments() {
+        assert!("process://name/extra".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn process_display_roundtrip() {
+        let t: Target = "process://9999".parse().unwrap();
+        assert_eq!(format!("{t}"), "process://9999");
+        let t: Target = "process://node".parse().unwrap();
+        assert_eq!(format!("{t}"), "process://node");
     }
 
     #[test]
