@@ -4,6 +4,7 @@
 mod cli;
 mod config;
 mod output;
+mod secret;
 
 use std::process::{ExitCode, Stdio};
 use std::sync::Arc;
@@ -116,11 +117,35 @@ async fn run(args: Args) -> Result<ExitStatus> {
             per_target_reverse[cli_count + i] = d;
         }
     }
-    let mut targets: Vec<Target> = raw_targets
+    let resolved_targets: Vec<String> = raw_targets
         .iter()
         .map(|s| {
-            s.parse::<Target>()
-                .with_context(|| format!("parsing `{s}`"))
+            let resolved = secret::resolve(s)
+                .map(std::borrow::Cow::into_owned)
+                .with_context(|| format!("resolving secrets in `{s}`"))?;
+            // Re-enforce MAX_TARGET_LEN after substitution. The pre-resolve
+            // check ran on a possibly-short placeholder; a long env var or
+            // file content could blow past the cap and we don't want a
+            // single secret to push us into many-megabyte target strings.
+            if resolved.len() > MAX_TARGET_LEN {
+                bail!(
+                    "resolved target exceeds {MAX_TARGET_LEN} bytes (was `{s}` before substitution)"
+                );
+            }
+            Ok(resolved)
+        })
+        .collect::<Result<_>>()?;
+    // Surface the ORIGINAL raw target string in the parse-error context,
+    // not the resolved one. Otherwise a failure to parse a target with
+    // `${env:SECRET}` would print the substituted value (and CI log
+    // collectors would capture it).
+    let mut targets: Vec<Target> = resolved_targets
+        .iter()
+        .zip(raw_targets.iter())
+        .map(|(resolved, raw)| {
+            resolved
+                .parse::<Target>()
+                .with_context(|| format!("parsing `{raw}`"))
         })
         .collect::<Result<_>>()?;
 
