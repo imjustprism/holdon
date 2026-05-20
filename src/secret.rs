@@ -27,6 +27,11 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
+/// Hard cap on the size of a file referenced by `${file:PATH}`. Anything
+/// larger is refused at metadata-check time so a stray placeholder
+/// pointing at /var/log can never grow the target string to gigabytes.
+const MAX_SECRET_FILE_BYTES: u64 = 64 * 1024;
+
 /// Walk the input once, replacing each `${env:...}` and `${file:...}`
 /// placeholder with the resolved value. Returns the original borrow
 /// when no placeholder is present so the common case is allocation-free.
@@ -47,13 +52,19 @@ pub(crate) fn resolve(input: &str) -> Result<Cow<'_, str>> {
             cursor = end;
             continue;
         }
-        let Some(rel_end) = input[cursor..].find('}') else {
-            bail!("unterminated `${{` in target string starting at byte offset {cursor}");
+        // Find the LAST `}` between this `${` and the next `${`, so
+        // file paths containing `}` survive intact. Env names cannot
+        // contain `}` anyway, so being greedy is safe for both kinds.
+        let search_end = input[cursor + 2..]
+            .find("${")
+            .map_or(input.len(), |off| cursor + 2 + off);
+        let Some(rel_end) = input[cursor + 2..search_end].rfind('}') else {
+            bail!("unterminated placeholder in target string at byte offset {cursor}");
         };
-        let close = cursor + rel_end;
+        let close = cursor + 2 + rel_end;
         let body = &input[cursor + 2..close];
         let Some((kind, arg)) = body.split_once(':') else {
-            // Not a `kind:arg` shape, leave the entire ${...} alone.
+            // Not a `kind:arg` shape, leave the entire `${...}` alone.
             out.push_str(&input[cursor..=close]);
             cursor = close + 1;
             continue;
@@ -85,6 +96,15 @@ fn resolve_env(name: &str) -> Result<String> {
 fn resolve_file(path: &str) -> Result<String> {
     if path.is_empty() {
         bail!("file placeholder requires a path");
+    }
+    let metadata = std::fs::metadata(Path::new(path))
+        .with_context(|| format!("reading secret file `{path}`"))?;
+    if metadata.len() > MAX_SECRET_FILE_BYTES {
+        bail!(
+            "secret file `{path}` is {} bytes, max {} (use a separate file or pre-process the secret)",
+            metadata.len(),
+            MAX_SECRET_FILE_BYTES
+        );
     }
     let raw = std::fs::read_to_string(Path::new(path))
         .with_context(|| format!("reading secret file `{path}`"))?;
@@ -141,6 +161,29 @@ mod tests {
         let err = resolve("scheme://x/${env:NAME_NO_CLOSE").unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("unterminated"), "{msg}");
+    }
+
+    #[test]
+    fn file_path_with_braces_resolves_last_brace() {
+        let mut dir = tempfile::TempDir::new().unwrap();
+        let _ = &mut dir;
+        let path = dir.path().join("with{braces}");
+        std::fs::write(&path, b"ok").unwrap();
+        let p = path.to_string_lossy().into_owned();
+        let input = format!("redis://x:${{file:{p}}}@h");
+        let r = resolve(&input).unwrap();
+        assert_eq!(r, "redis://x:ok@h");
+    }
+
+    #[test]
+    fn oversized_file_rejected() {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        let size = usize::try_from(MAX_SECRET_FILE_BYTES + 1).unwrap();
+        let big = vec![b'a'; size];
+        f.write_all(&big).unwrap();
+        let p = f.path().to_string_lossy().into_owned();
+        let err = resolve(&format!("redis://x:${{file:{p}}}@h")).unwrap_err();
+        assert!(format!("{err:#}").contains("max"));
     }
 
     #[test]

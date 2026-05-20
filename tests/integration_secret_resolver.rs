@@ -2,7 +2,8 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    clippy::missing_panics_doc
+    clippy::missing_panics_doc,
+    clippy::literal_string_with_formatting_args
 )]
 
 //! End-to-end coverage for the env-source secret resolver. Lives here
@@ -35,10 +36,7 @@ fn env_placeholder_resolved_in_target_string() {
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("expanded-value-marker"),
-        "stderr={stderr}"
-    );
+    assert!(stderr.contains("expanded-value-marker"), "stderr={stderr}");
 }
 
 #[test]
