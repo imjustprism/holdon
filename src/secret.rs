@@ -52,25 +52,14 @@ pub(crate) fn resolve(input: &str) -> Result<Cow<'_, str>> {
             cursor = end;
             continue;
         }
-        // Find the LAST `}` between this `${` and the next `${`, so
-        // file paths containing `}` survive intact. Env names cannot
-        // contain `}` anyway, so being greedy is safe for both kinds.
-        let search_end = input[cursor + 2..]
-            .find("${")
-            .map_or(input.len(), |off| cursor + 2 + off);
-        let Some(rel_end) = input[cursor + 2..search_end].rfind('}') else {
-            // No closing brace before the next `${` (or end of input).
-            // Could be an unknown-kind placeholder whose argument
-            // contains a literal `${`. Per the module contract we leave
-            // unknown placeholders alone, so emit `${` verbatim and
-            // continue scanning. Only bail for the truly unterminated
-            // case where there is no `}` anywhere after the cursor.
-            if !input[cursor + 2..].contains('}') {
-                bail!("unterminated placeholder in target string at byte offset {cursor}");
-            }
-            out.push_str("${");
-            cursor += 2;
-            continue;
+        // Take the FIRST `}` after `${`. Greedy matching would pull in
+        // an unrelated trailing `}` from the surrounding string (e.g.
+        // `http://h/{${env:ID}}/p` would otherwise capture `env:ID}`
+        // as the body). File paths or argument strings that themselves
+        // contain `}` are not supported by this resolver; pre-process
+        // such secrets through env or escape them.
+        let Some(rel_end) = input[cursor + 2..].find('}') else {
+            bail!("unterminated placeholder in target string at byte offset {cursor}");
         };
         let close = cursor + 2 + rel_end;
         let body = &input[cursor + 2..close];
@@ -196,15 +185,15 @@ mod tests {
     }
 
     #[test]
-    fn file_path_with_braces_resolves_last_brace() {
-        let mut dir = tempfile::TempDir::new().unwrap();
-        let _ = &mut dir;
-        let path = dir.path().join("with{braces}");
-        std::fs::write(&path, b"ok").unwrap();
-        let p = path.to_string_lossy().into_owned();
-        let input = format!("redis://x:${{file:{p}}}@h");
-        let r = resolve(&input).unwrap();
-        assert_eq!(r, "redis://x:ok@h");
+    fn known_kind_with_adjacent_trailing_brace_uses_first_close() {
+        // `http://h/{${env:ID}}/p` previously captured `env:ID}` as
+        // the body. The fix uses the first `}` after `${`, so the
+        // surrounding literal `}` is left alone.
+        let err = resolve("http://h/{${env:HOLDON_TEST_BOGUS_ID}}/p").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("HOLDON_TEST_BOGUS_ID"), "{msg}");
+        // The bogus name, not `HOLDON_TEST_BOGUS_ID}`.
+        assert!(!msg.contains("BOGUS_ID}"), "{msg}");
     }
 
     #[test]
