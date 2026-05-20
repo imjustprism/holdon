@@ -9,7 +9,7 @@
 
 //! Behavioural coverage for the `--max-rtt` SLA gate. Lives in its own
 //! integration-test file because `holdon::checker::http::set_global`
-//! uses a `OnceLock`, so the HttpConfig can only be initialised once
+//! uses a `OnceLock`, so the `HttpConfig` can only be initialised once
 //! per process and must be set before any probe runs.
 
 mod common;
