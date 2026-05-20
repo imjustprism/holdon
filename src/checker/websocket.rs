@@ -13,11 +13,15 @@ use tokio_tungstenite::tungstenite::Error as WsError;
 use url::Url;
 
 use super::hint::hints;
-use super::{AttemptCtx, err_stage, ok_stage};
+use super::{AttemptCtx, err_stage, install_rustls_provider_once, ok_stage};
 use crate::diagnostic::{Stage, StageKind};
 use crate::util::{format_error_chain, redact_in};
 
 pub(super) async fn probe(url: &Url, ctx: AttemptCtx) -> Vec<Stage> {
+    // rustls 0.23 requires a global crypto provider before any
+    // ClientConfig::builder call. tokio-tungstenite hits that path
+    // for wss://, so install ring up front like the other TLS probes.
+    install_rustls_provider_once();
     let start = Instant::now();
     let pw = url.password().unwrap_or("").to_owned();
     let stage = match timeout(ctx.attempt_timeout, connect(url)).await {
@@ -30,12 +34,10 @@ pub(super) async fn probe(url: &Url, ctx: AttemptCtx) -> Vec<Stage> {
             }
             err_stage(StageKind::Ws, start.elapsed(), msg, Some(hint))
         }
-        Err(_) => err_stage(
-            StageKind::Ws,
-            ctx.attempt_timeout,
-            hints::TIMED_OUT,
-            Some(hints::WS_NO_CONNECT),
-        ),
+        // attempt_timeout covers the whole handshake (TCP + TLS + HTTP
+        // Upgrade), so a timeout is not specifically a "no TCP" event.
+        // Drop the hint to avoid pointing the user at the wrong layer.
+        Err(_) => err_stage(StageKind::Ws, ctx.attempt_timeout, hints::TIMED_OUT, None),
     };
     vec![stage]
 }

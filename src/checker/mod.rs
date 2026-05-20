@@ -186,7 +186,8 @@ pub(crate) fn err_stage(
     feature = "mysql",
     feature = "mongodb",
     feature = "rabbitmq",
-    feature = "kafka"
+    feature = "kafka",
+    feature = "websocket"
 ))]
 pub(crate) fn install_rustls_provider_once() {
     use std::sync::OnceLock;
