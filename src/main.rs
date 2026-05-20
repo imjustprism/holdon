@@ -402,21 +402,18 @@ async fn run(args: Args) -> Result<ExitStatus> {
         // spurious "ready -> fail" transitions on the first tick for
         // targets that were never satisfied.
         let initial_ready: Vec<bool> = report.results.iter().map(|r| r.satisfied).collect();
-        let mut attempt_ctx = holdon::checker::AttemptCtx::default();
-        attempt_ctx.attempt_timeout = cfg.attempt_timeout;
-        // Per-target reverse polarity matches the runner. Each entry
-        // falls back to the global reverse when no [[check]] direction
-        // override is set. Without this, a target with
-        // direction = "down" would be re-probed in watch mode with the
-        // wrong polarity and fire a spurious transition on tick one.
         let watch_reverse: Vec<bool> = per_target_reverse
             .iter()
             .map(|d| d.unwrap_or(global_reverse))
             .collect();
+        let watch_attempt_timeouts: Vec<Duration> = per_target_overrides
+            .iter()
+            .map(|o| o.attempt_timeout.unwrap_or(cfg.attempt_timeout))
+            .collect();
         watch_loop(
             targets_for_watch,
             initial_ready,
-            attempt_ctx,
+            watch_attempt_timeouts,
             args.watch_interval,
             watch_reverse,
             &interrupted,
@@ -700,7 +697,7 @@ async fn fire_webhook(url: &str, ready: bool, report: &holdon::Report, timeout: 
 async fn watch_loop(
     targets: Vec<Target>,
     initial_ready: Vec<bool>,
-    ctx: holdon::checker::AttemptCtx,
+    attempt_timeouts: Vec<Duration>,
     interval: Duration,
     reverse_per_target: Vec<bool>,
     interrupted: &Arc<AtomicU8>,
@@ -742,8 +739,12 @@ async fn watch_loop(
                 for (idx, target) in targets.iter().enumerate() {
                     let target = target.clone();
                     let reverse = reverse_per_target.get(idx).copied().unwrap_or(false);
+                    let mut probe_ctx = holdon::checker::AttemptCtx::default();
+                    if let Some(t) = attempt_timeouts.get(idx).copied() {
+                        probe_ctx.attempt_timeout = t;
+                    }
                     set.spawn(async move {
-                        let outcome = target.probe(ctx).await;
+                        let outcome = target.probe(probe_ctx).await;
                         // Match runner.rs Direction::Reverse: invert
                         // the raw probe result so "ready" means
                         // "satisfied the user's intent", per the
