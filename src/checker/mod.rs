@@ -37,6 +37,8 @@ mod redis;
 mod tcp;
 #[cfg(feature = "temporal")]
 mod temporal;
+#[cfg(feature = "websocket")]
+mod websocket;
 
 pub(crate) use hint::{Hintable, hints};
 
@@ -136,6 +138,10 @@ impl Target {
             } => k8s::probe(*kind, namespace, name, ctx).await,
             #[cfg(not(feature = "k8s"))]
             Self::K8s { .. } => disabled_stage(StageKind::K8s, "k8s"),
+            #[cfg(feature = "websocket")]
+            Self::Ws { url } => websocket::probe(url, ctx).await,
+            #[cfg(not(feature = "websocket"))]
+            Self::Ws { .. } => disabled_stage(StageKind::Ws, "websocket"),
         };
         let ok = stages
             .last()

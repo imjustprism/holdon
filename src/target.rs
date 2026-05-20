@@ -149,6 +149,9 @@ pub enum Target {
         namespace: String,
         name: String,
     },
+    Ws {
+        url: Url,
+    },
 }
 
 /// Kinds of Kubernetes resource that [`Target::K8s`] knows how to probe.
@@ -388,6 +391,7 @@ impl fmt::Debug for Target {
                 .field("namespace", namespace)
                 .field("name", name)
                 .finish(),
+            Self::Ws { url } => f.debug_struct("Ws").field("url", &redact(url)).finish(),
         }
     }
 }
@@ -410,7 +414,8 @@ impl fmt::Display for Target {
             | Self::Mongodb { url }
             | Self::Rabbitmq { url, .. }
             | Self::Kafka { url, .. }
-            | Self::Temporal { url } => write!(f, "{}", redact(url)),
+            | Self::Temporal { url }
+            | Self::Ws { url } => write!(f, "{}", redact(url)),
             Self::Docker { name, expect } => {
                 write!(f, "docker://{name}")?;
                 let first = if let Some(s) = &expect.state {
@@ -971,6 +976,18 @@ impl FromStr for Target {
             }
             "docker" => parse_docker_target(input, &url),
             "k8s" | "kubernetes" => parse_k8s_target(input, &url),
+            "ws" | "wss" => {
+                let host = url
+                    .host_str()
+                    .ok_or_else(|| parse_err(input, "missing host"))?;
+                Hostname::new(host)?;
+                url.port_or_known_default()
+                    .ok_or_else(|| Error::MissingPort(scrub_target_input(input)))?;
+                if url.query().is_some() {
+                    return Err(parse_err(input, "ws:// does not accept query parameters"));
+                }
+                Ok(Self::Ws { url })
+            }
             other => Err(Error::UnsupportedScheme(other.into())),
         }
     }
@@ -1361,6 +1378,37 @@ mod tests {
     fn k8s_display_roundtrip() {
         let t: Target = "k8s://deployments/kube-system/core-dns".parse().unwrap();
         assert_eq!(format!("{t}"), "k8s://deployment/kube-system/core-dns");
+    }
+
+    #[test]
+    fn ws_parse_and_redact() {
+        let t: Target = "ws://example.com:9000/socket".parse().unwrap();
+        assert!(matches!(t, Target::Ws { .. }));
+        let t: Target = "wss://example.com/socket".parse().unwrap();
+        match &t {
+            Target::Ws { url } => {
+                assert_eq!(url.port_or_known_default(), Some(443));
+            }
+            _ => panic!("expected Ws"),
+        }
+        // Password is redacted in Display
+        let with_pw: Target = "wss://user:hunter2@example.com/socket".parse().unwrap();
+        let displayed = format!("{with_pw}");
+        assert!(!displayed.contains("hunter2"), "got: {displayed}");
+    }
+
+    #[test]
+    fn ws_rejects_query() {
+        assert!("ws://host:1/path?foo=bar".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn ws_missing_port_for_plain_ws_is_default_80() {
+        // ws:// has a known default port (80) and wss:// has 443, so
+        // omitting the port is fine; only schemes with no default port
+        // need to error.
+        assert!("ws://host/p".parse::<Target>().is_ok());
+        assert!("wss://host/p".parse::<Target>().is_ok());
     }
 
     #[test]
