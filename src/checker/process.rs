@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System};
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System, UpdateKind};
 
 use super::{AttemptCtx, err_stage, hints, ok_stage};
 use crate::diagnostic::{Stage, StageKind};
@@ -25,8 +25,10 @@ pub(super) async fn probe(selector: &ProcessSelector, _ctx: AttemptCtx) -> Vec<S
 }
 
 fn lookup(selector: &ProcessSelector, start: Instant) -> Stage {
-    let refresh = RefreshKind::new().with_processes(ProcessRefreshKind::new());
-    let mut sys = System::new_with_specifics(refresh);
+    // Empty constructor — sysinfo would otherwise pre-scan the entire
+    // process table during construction. Each branch performs exactly one
+    // scan with the scope it needs.
+    let mut sys = System::new_with_specifics(RefreshKind::new());
     match selector {
         ProcessSelector::Pid(pid) => {
             let target = sysinfo::Pid::from_u32(*pid);
@@ -47,10 +49,12 @@ fn lookup(selector: &ProcessSelector, start: Instant) -> Stage {
             }
         }
         ProcessSelector::Name(name) => {
+            // Ask for the exe path so the fallback in `matches_name` can
+            // recover Linux `comm` values, which are capped at 15 bytes.
             sys.refresh_processes_specifics(
                 ProcessesToUpdate::All,
                 false,
-                ProcessRefreshKind::new(),
+                ProcessRefreshKind::new().with_exe(UpdateKind::Always),
             );
             if any_process_matches(&sys, name) {
                 ok_stage(StageKind::Process, start.elapsed())
@@ -75,16 +79,17 @@ fn matches_name(proc: &sysinfo::Process, wanted: &str) -> bool {
     if equal(&raw, wanted) {
         return true;
     }
-    if let Some(stem) = strip_exe_suffix(&raw)
-        && equal(stem, wanted)
-    {
-        return true;
+    if let Some(stem) = strip_exe_suffix(&raw) {
+        if equal(stem, wanted) {
+            return true;
+        }
     }
-    if let Some(exe) = proc.exe()
-        && let Some(stem) = exe.file_stem().and_then(|s| s.to_str())
-        && equal(stem, wanted)
-    {
-        return true;
+    if let Some(exe) = proc.exe() {
+        if let Some(stem) = exe.file_stem().and_then(|s| s.to_str()) {
+            if equal(stem, wanted) {
+                return true;
+            }
+        }
     }
     false
 }
