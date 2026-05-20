@@ -88,6 +88,8 @@ async fn run(args: Args) -> Result<ExitStatus> {
     let cli_count = raw_targets.len();
     append_config_targets(&mut raw_targets, &config_data.targets)?;
     let mut names: Vec<Option<String>> = std::iter::repeat_n(None, raw_targets.len()).collect();
+    let mut per_target_reverse: Vec<Option<bool>> =
+        std::iter::repeat_n(None, raw_targets.len()).collect();
     // config_data.names lines up with config_data.targets entries (the
     // legacy targets array plus any [[check]] blocks, in file order).
     // Splice it in starting after the positional CLI targets.
@@ -103,6 +105,15 @@ async fn run(args: Args) -> Result<ExitStatus> {
             .enumerate()
         {
             names[cli_count + i] = n;
+        }
+        for (i, d) in config_data
+            .reverse_per_target
+            .iter()
+            .take(config_target_count)
+            .copied()
+            .enumerate()
+        {
+            per_target_reverse[cli_count + i] = d;
         }
     }
     let mut targets: Vec<Target> = raw_targets
@@ -223,6 +234,28 @@ async fn run(args: Args) -> Result<ExitStatus> {
             },
         )
         .jitter(!args.no_jitter && config_data.jitter.unwrap_or(true));
+
+    // Per-target direction overrides from [[check]] blocks. None means
+    // "inherit the global direction set above". Some(true) flips
+    // polarity for that one target.
+    let global_reverse = args.reverse || config_data.reverse.unwrap_or(false);
+    let has_per_target = per_target_reverse.iter().any(Option::is_some);
+    let cfg = if has_per_target {
+        let directions: Vec<holdon::Direction> = per_target_reverse
+            .iter()
+            .map(|d| {
+                let reversed = d.unwrap_or(global_reverse);
+                if reversed {
+                    holdon::Direction::Reverse
+                } else {
+                    holdon::Direction::Wait
+                }
+            })
+            .collect();
+        cfg.directions(Some(directions))
+    } else {
+        cfg
+    };
 
     let no_color_env = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
     let color =
