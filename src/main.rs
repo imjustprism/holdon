@@ -341,13 +341,21 @@ async fn run(args: Args) -> Result<ExitStatus> {
         let initial_ready: Vec<bool> = report.results.iter().map(|r| r.satisfied).collect();
         let mut attempt_ctx = holdon::checker::AttemptCtx::default();
         attempt_ctx.attempt_timeout = cfg.attempt_timeout;
-        let reverse = args.reverse || config_data.reverse.unwrap_or(false);
+        // Per-target reverse polarity matches the runner. Each entry
+        // falls back to the global reverse when no [[check]] direction
+        // override is set. Without this, a target with
+        // direction = "down" would be re-probed in watch mode with the
+        // wrong polarity and fire a spurious transition on tick one.
+        let watch_reverse: Vec<bool> = per_target_reverse
+            .iter()
+            .map(|d| d.unwrap_or(global_reverse))
+            .collect();
         watch_loop(
             targets_for_watch,
             initial_ready,
             attempt_ctx,
             args.watch_interval,
-            reverse,
+            watch_reverse,
             &interrupted,
         )
         .await;
@@ -582,7 +590,7 @@ async fn watch_loop(
     initial_ready: Vec<bool>,
     ctx: holdon::checker::AttemptCtx,
     interval: Duration,
-    reverse: bool,
+    reverse_per_target: Vec<bool>,
     interrupted: &Arc<AtomicU8>,
 ) {
     use std::io::Write as _;
@@ -621,12 +629,14 @@ async fn watch_loop(
                 let mut set = tokio::task::JoinSet::new();
                 for (idx, target) in targets.iter().enumerate() {
                     let target = target.clone();
+                    let reverse = reverse_per_target.get(idx).copied().unwrap_or(false);
                     set.spawn(async move {
                         let outcome = target.probe(ctx).await;
                         // Match runner.rs Direction::Reverse: invert
                         // the raw probe result so "ready" means
-                        // "satisfied the user's intent", regardless of
-                        // whether they were waiting for up or for down.
+                        // "satisfied the user's intent", per the
+                        // per-target direction that was used during
+                        // the initial run.
                         let ready = if reverse {
                             !outcome.is_ready()
                         } else {
