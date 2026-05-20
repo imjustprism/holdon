@@ -300,13 +300,8 @@ async fn run(args: Args) -> Result<ExitStatus> {
     let cfg = if has_any_override {
         let overrides: Vec<holdon::runner::TargetOverrides> = per_target_overrides
             .iter()
-            .map(|o| {
-                let mut t = holdon::runner::TargetOverrides::default();
-                t.interval = o.interval;
-                t.attempt_timeout = o.attempt_timeout;
-                t.success_threshold = o.success_threshold;
-                t
-            })
+            .copied()
+            .map(Into::into)
             .collect();
         cfg.overrides(Some(overrides))
     } else {

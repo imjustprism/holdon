@@ -100,6 +100,16 @@ impl PerTargetOverride {
     }
 }
 
+impl From<PerTargetOverride> for holdon::TargetOverrides {
+    fn from(o: PerTargetOverride) -> Self {
+        let mut t = Self::default();
+        t.interval = o.interval;
+        t.attempt_timeout = o.attempt_timeout;
+        t.success_threshold = o.success_threshold;
+        t
+    }
+}
+
 pub(crate) fn load(explicit: Option<&Path>) -> Result<Resolved> {
     let (path, was_auto_detected) = match explicit {
         Some(p) => (Some(p.to_path_buf()), false),

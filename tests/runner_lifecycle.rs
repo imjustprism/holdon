@@ -175,32 +175,42 @@ async fn once_makes_exactly_one_attempt() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn per_target_attempt_timeout_overrides_global() {
-    let port_slow = free_port().await;
+    let (slow_listener, slow_port) = bind_ephemeral().await;
+    let _slow = tokio::spawn(async move {
+        loop {
+            let Ok((mut sock, _)) = slow_listener.accept().await else {
+                return;
+            };
+            tokio::spawn(async move {
+                let mut buf = [0u8; 1];
+                let _ = tokio::io::AsyncReadExt::read(&mut sock, &mut buf).await;
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            });
+        }
+    });
+    let target_slow: Target = format!("http://127.0.0.1:{slow_port}/").parse().unwrap();
+
     let (l_open, port_open) = bind_ephemeral().await;
-    // Keep the listener alive for the whole run.
     let _open = Box::leak(Box::new(l_open));
-    let targets: Vec<Target> = [port_slow, port_open]
-        .iter()
-        .map(|p| format!("127.0.0.1:{p}").parse().unwrap())
-        .collect();
-    // Globally long attempt timeout, but the closed port gets a 50ms override.
-    // If the override is honoured, the failing target finishes long before the
-    // global 2s budget could expire it.
+    let target_open: Target = format!("127.0.0.1:{port_open}").parse().unwrap();
+
     let mut ov_short = holdon::TargetOverrides::default();
-    ov_short.attempt_timeout = Some(Duration::from_millis(50));
+    ov_short.attempt_timeout = Some(Duration::from_millis(150));
     let overrides = vec![ov_short, holdon::TargetOverrides::default()];
     let cfg = RunnerConfig::default()
-        .timeout(Duration::from_secs(1))
-        .attempt_timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(3))
+        .attempt_timeout(Duration::from_secs(10))
         .once(true)
         .overrides(Some(overrides));
     let start = Instant::now();
-    let report = Runner::new(cfg).run(targets, None).await;
+    let report = Runner::new(cfg)
+        .run(vec![target_slow, target_open], None)
+        .await;
     let elapsed = start.elapsed();
     assert!(!report.results[0].satisfied);
     assert!(report.results[1].satisfied);
     assert!(
-        elapsed < Duration::from_millis(800),
+        elapsed < Duration::from_secs(2),
         "per-target attempt_timeout not honoured, elapsed={elapsed:?}"
     );
 }

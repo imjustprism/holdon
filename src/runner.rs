@@ -449,7 +449,10 @@ async fn run_single(
     sink: Option<&EventSink>,
 ) -> TargetReport {
     let attempt_ctx = AttemptCtx {
-        attempt_timeout: overrides.attempt_timeout.unwrap_or(cfg.attempt_timeout),
+        attempt_timeout: overrides
+            .attempt_timeout
+            .unwrap_or(cfg.attempt_timeout)
+            .max(RunnerConfig::MIN_INTERVAL),
     };
     let initial_interval = overrides.interval.unwrap_or(cfg.initial_interval);
     let mut interval = initial_interval.max(RunnerConfig::MIN_INTERVAL);
