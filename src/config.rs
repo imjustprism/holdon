@@ -39,6 +39,11 @@ pub(crate) struct CheckEntry {
     pub name: Option<String>,
     /// Target string in the same syntax as positional CLI arguments.
     pub target: String,
+    /// Per-target direction: `"up"` (wait until ready, default) or
+    /// `"down"` (wait until NOT ready). Lets a single run mix
+    /// must-be-ready and must-be-down targets, which the global
+    /// `--reverse` flag cannot express.
+    pub direction: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -59,6 +64,10 @@ pub(crate) struct Resolved {
     /// for positional CLI targets and `targets = [...]` entries that
     /// carry no label, `Some` for `[[check]]` blocks with `name`.
     pub names: Vec<Option<String>>,
+    /// One entry per target in `targets`. `None` means "fall back to
+    /// the global direction", `Some(true)` flips polarity (wait for
+    /// the target to be NOT ready).
+    pub reverse_per_target: Vec<Option<bool>>,
 }
 
 pub(crate) fn load(explicit: Option<&Path>) -> Result<Resolved> {
@@ -113,6 +122,8 @@ fn parse_durations(raw: ConfigFile, path: &Path) -> Result<Resolved> {
     }
     let mut targets = raw.targets;
     let mut names: Vec<Option<String>> = std::iter::repeat_n(None, targets.len()).collect();
+    let mut reverse_per_target: Vec<Option<bool>> =
+        std::iter::repeat_n(None, targets.len()).collect();
     for (i, entry) in raw.check.into_iter().enumerate() {
         if entry.target.trim().is_empty() {
             bail!(
@@ -128,8 +139,21 @@ fn parse_durations(raw: ConfigFile, path: &Path) -> Result<Resolved> {
                 i = i + 1
             );
         }
+        let direction = match entry.direction.as_deref().map(str::to_ascii_lowercase) {
+            None => None,
+            Some(ref s) if s == "up" || s == "wait" => Some(false),
+            Some(ref s) if s == "down" || s == "reverse" => Some(true),
+            Some(s) => {
+                bail!(
+                    "{}: [[check]] #{i} direction `{s}` invalid (expected `up` or `down`)",
+                    path.display(),
+                    i = i + 1
+                );
+            }
+        };
         targets.push(entry.target);
         names.push(entry.name);
+        reverse_per_target.push(direction);
     }
     Ok(Resolved {
         interval: dur("interval", raw.interval)?,
@@ -145,6 +169,7 @@ fn parse_durations(raw: ConfigFile, path: &Path) -> Result<Resolved> {
         at_least: raw.at_least,
         targets,
         names,
+        reverse_per_target,
     })
 }
 
@@ -212,5 +237,49 @@ mod tests {
         let err = parse("[[check]]\ntarget = \":1\"\nfuture = true\n").unwrap_err();
         let full = format!("{err:#}");
         assert!(full.contains("future"), "got: {full}");
+    }
+
+    #[test]
+    fn check_direction_up_parses_as_wait() {
+        let r = parse("[[check]]\ntarget = \":1\"\ndirection = \"up\"\n").unwrap();
+        assert_eq!(r.reverse_per_target, vec![Some(false)]);
+    }
+
+    #[test]
+    fn check_direction_down_parses_as_reverse() {
+        let r = parse("[[check]]\ntarget = \":1\"\ndirection = \"down\"\n").unwrap();
+        assert_eq!(r.reverse_per_target, vec![Some(true)]);
+    }
+
+    #[test]
+    fn check_direction_case_insensitive() {
+        let r = parse("[[check]]\ntarget = \":1\"\ndirection = \"DOWN\"\n").unwrap();
+        assert_eq!(r.reverse_per_target, vec![Some(true)]);
+    }
+
+    #[test]
+    fn check_direction_aliases() {
+        let up = parse("[[check]]\ntarget = \":1\"\ndirection = \"wait\"\n").unwrap();
+        assert_eq!(up.reverse_per_target, vec![Some(false)]);
+        let down = parse("[[check]]\ntarget = \":1\"\ndirection = \"reverse\"\n").unwrap();
+        assert_eq!(down.reverse_per_target, vec![Some(true)]);
+    }
+
+    #[test]
+    fn check_direction_invalid_rejected() {
+        let err = parse("[[check]]\ntarget = \":1\"\ndirection = \"sideways\"\n").unwrap_err();
+        let full = format!("{err:#}");
+        assert!(full.contains("sideways"), "got: {full}");
+    }
+
+    #[test]
+    fn check_missing_direction_inherits_global() {
+        let r = parse(
+            "targets = [\":1\"]\n\
+             [[check]]\n\
+             target = \":2\"\n",
+        )
+        .unwrap();
+        assert_eq!(r.reverse_per_target, vec![None, None]);
     }
 }

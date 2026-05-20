@@ -67,6 +67,12 @@ pub struct RunnerConfig {
     pub schedule: Schedule,
     pub success_threshold: u32,
     pub jitter: bool,
+    /// Optional per-target direction overrides. When set, index `i` is
+    /// used for the target at position `i` in the run-targets vec and
+    /// the global `direction` field is ignored for that target. Extra
+    /// entries beyond the targets vec are silently truncated, missing
+    /// entries fall back to the global `direction`.
+    pub directions: Option<Vec<Direction>>,
 }
 
 impl RunnerConfig {
@@ -132,6 +138,7 @@ impl Default for RunnerConfig {
             schedule: Schedule::Parallel,
             success_threshold: Self::DEFAULT_SUCCESS_THRESHOLD,
             jitter: true,
+            directions: None,
         }
     }
 }
@@ -193,6 +200,15 @@ impl RunnerConfig {
     #[must_use]
     pub const fn jitter(mut self, v: bool) -> Self {
         self.jitter = v;
+        self
+    }
+
+    /// Set per-target direction overrides. The slice index aligns with
+    /// the targets vec passed to [`Runner::run`]. Pass `None` to fall
+    /// back to the single global `direction`.
+    #[must_use]
+    pub fn directions(mut self, v: Option<Vec<Direction>>) -> Self {
+        self.directions = v;
         self
     }
 }
@@ -318,10 +334,20 @@ impl Runner {
             sleep(self.cfg.initial_delay).await;
         }
 
+        let pick_direction = |idx: usize| -> Direction {
+            self.cfg
+                .directions
+                .as_ref()
+                .and_then(|v| v.get(idx).copied())
+                .unwrap_or(self.cfg.direction)
+        };
+
         if matches!(self.cfg.schedule, Schedule::Sequential) {
             let mut results = Vec::with_capacity(targets.len());
             for (idx, target) in targets.into_iter().enumerate() {
-                let r = run_single(idx, target, self.cfg.clone(), deadline, sink.as_ref()).await;
+                let dir = pick_direction(idx);
+                let r =
+                    run_single(idx, target, self.cfg.clone(), dir, deadline, sink.as_ref()).await;
                 results.push(r);
             }
             return Report {
@@ -334,8 +360,9 @@ impl Runner {
         let mut set: JoinSet<TargetReport> = JoinSet::new();
         for (idx, target) in targets.into_iter().enumerate() {
             let cfg = self.cfg.clone();
+            let dir = pick_direction(idx);
             let s = sink.clone();
-            set.spawn(async move { run_single(idx, target, cfg, deadline, s.as_ref()).await });
+            set.spawn(async move { run_single(idx, target, cfg, dir, deadline, s.as_ref()).await });
         }
 
         let mut results = Vec::with_capacity(target_count);
@@ -360,6 +387,7 @@ async fn run_single(
     idx: usize,
     target: Target,
     cfg: RunnerConfig,
+    direction: Direction,
     deadline: Instant,
     sink: Option<&EventSink>,
 ) -> TargetReport {
@@ -376,7 +404,7 @@ async fn run_single(
         attempts += 1;
         tracing::debug!(attempt = attempts, "probing");
         let outcome = target.probe(attempt_ctx).await;
-        let one_ready = match cfg.direction {
+        let one_ready = match direction {
             Direction::Wait => outcome.is_ready(),
             Direction::Reverse => !outcome.is_ready(),
         };
