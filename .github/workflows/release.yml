@@ -98,7 +98,7 @@ jobs:
             tar -czf "${name}.tar.gz" "${name}"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: holdon-${{ matrix.target }}
           path: dist/holdon-${{ matrix.target }}.*
@@ -128,7 +128,7 @@ jobs:
           done
           "$bin" --generate-manpage > "out/man/holdon.1"
           (cd out && tar -czf ../holdon-completions-and-manpage.tar.gz completions man)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: completions-and-manpage
           path: holdon-completions-and-manpage.tar.gz
@@ -154,7 +154,7 @@ jobs:
           fi
           mkdir -p sbom-out
           cp "${path}" sbom-out/holdon-sbom.cdx.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sbom
           path: sbom-out/holdon-sbom.cdx.json
