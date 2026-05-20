@@ -110,6 +110,12 @@ fn resolve_file(path: &str) -> Result<String> {
     }
     let metadata = std::fs::metadata(Path::new(path))
         .with_context(|| format!("reading secret file `{path}`"))?;
+    // Refuse character devices, pipes, sockets etc. Their reported
+    // length is 0 on Linux/macOS, which would otherwise sail past the
+    // size cap below and trap us in an unbounded read.
+    if !metadata.is_file() {
+        bail!("secret file `{path}` is not a regular file");
+    }
     if metadata.len() > MAX_SECRET_FILE_BYTES {
         bail!(
             "secret file `{path}` is {} bytes, max {} (use a separate file or pre-process the secret)",
