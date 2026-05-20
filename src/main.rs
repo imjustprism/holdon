@@ -408,7 +408,11 @@ async fn run(args: Args) -> Result<ExitStatus> {
             .collect();
         let watch_attempt_timeouts: Vec<Duration> = per_target_overrides
             .iter()
-            .map(|o| o.attempt_timeout.unwrap_or(cfg.attempt_timeout))
+            .map(|o| {
+                o.attempt_timeout
+                    .unwrap_or(cfg.attempt_timeout)
+                    .max(RunnerConfig::MIN_INTERVAL)
+            })
             .collect();
         watch_loop(
             targets_for_watch,
