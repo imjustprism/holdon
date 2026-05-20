@@ -20,11 +20,13 @@ fn cmd() -> Command {
 }
 
 #[test]
-fn env_placeholder_resolved_in_target_string() {
-    // We do not actually need the target to be reachable. We use the
-    // parse error path: holdon prints the resolved target string when
-    // parsing fails, so we can verify substitution happened by looking
-    // for the expanded value in stderr.
+fn env_placeholder_resolves_but_secret_value_never_logged() {
+    // Two guarantees:
+    //  1. Resolution happens before URL parsing (the env var is read).
+    //  2. The substituted value never appears in stderr, only the
+    //     original placeholder form. This is the contract that lets
+    //     operators safely use `${env:SECRET}` in CI without log
+    //     collectors capturing the secret.
     let out = cmd()
         .env("HOLDON_SECRET_TEST", "expanded-value-marker")
         .arg("--timeout")
@@ -36,7 +38,14 @@ fn env_placeholder_resolved_in_target_string() {
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("expanded-value-marker"), "stderr={stderr}");
+    assert!(
+        !stderr.contains("expanded-value-marker"),
+        "secret leaked into stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("${env:HOLDON_SECRET_TEST}"),
+        "expected original placeholder in stderr: {stderr}"
+    );
 }
 
 #[test]

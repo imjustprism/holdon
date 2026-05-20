@@ -135,11 +135,17 @@ async fn run(args: Args) -> Result<ExitStatus> {
             Ok(resolved)
         })
         .collect::<Result<_>>()?;
+    // Surface the ORIGINAL raw target string in the parse-error context,
+    // not the resolved one. Otherwise a failure to parse a target with
+    // `${env:SECRET}` would print the substituted value (and CI log
+    // collectors would capture it).
     let mut targets: Vec<Target> = resolved_targets
         .iter()
-        .map(|s| {
-            s.parse::<Target>()
-                .with_context(|| format!("parsing `{s}`"))
+        .zip(raw_targets.iter())
+        .map(|(resolved, raw)| {
+            resolved
+                .parse::<Target>()
+                .with_context(|| format!("parsing `{raw}`"))
         })
         .collect::<Result<_>>()?;
 
