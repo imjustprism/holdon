@@ -3,7 +3,8 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    clippy::missing_panics_doc
+    clippy::missing_panics_doc,
+    clippy::manual_let_else
 )]
 
 //! Behavioural coverage for the `--max-rtt` SLA gate. Lives in its own
