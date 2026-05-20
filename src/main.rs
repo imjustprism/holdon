@@ -4,6 +4,7 @@
 mod cli;
 mod config;
 mod output;
+mod secret;
 
 use std::process::{ExitCode, Stdio};
 use std::sync::Arc;
@@ -116,7 +117,15 @@ async fn run(args: Args) -> Result<ExitStatus> {
             per_target_reverse[cli_count + i] = d;
         }
     }
-    let mut targets: Vec<Target> = raw_targets
+    let resolved_targets: Vec<String> = raw_targets
+        .iter()
+        .map(|s| {
+            secret::resolve(s)
+                .map(std::borrow::Cow::into_owned)
+                .with_context(|| format!("resolving secrets in `{s}`"))
+        })
+        .collect::<Result<_>>()?;
+    let mut targets: Vec<Target> = resolved_targets
         .iter()
         .map(|s| {
             s.parse::<Target>()
