@@ -181,6 +181,7 @@ async fn run(args: Args) -> Result<ExitStatus> {
             client_identity_pem,
             header_expectations,
             http2_prior_knowledge: args.http2_prior_knowledge,
+            max_rtt: args.max_rtt,
         });
     }
 

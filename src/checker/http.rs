@@ -74,6 +74,12 @@ pub struct HttpConfig {
     pub client_identity_pem: Option<Vec<u8>>,
     pub header_expectations: Vec<(HeaderName, regex_lite::Regex)>,
     pub http2_prior_knowledge: bool,
+    /// Soft upper bound on the response time. When set, a probe that
+    /// receives an otherwise acceptable response slower than this
+    /// duration is reported as not-ready with a clear "exceeded SLA"
+    /// message. Lets a holdon gate fail before promoting a slow
+    /// dependency, separate from the hard `attempt_timeout`.
+    pub max_rtt: Option<std::time::Duration>,
 }
 
 impl HttpConfig {
@@ -213,7 +219,10 @@ pub(super) async fn probe(url: &Url, expect: &StatusRange, ctx: AttemptCtx) -> V
                 header_err
             } else if needs_body_inspection(cfg) {
                 match read_body_capped(resp).await {
-                    Ok(body) => evaluate_body_matchers(cfg, &body, start),
+                    Ok(body) => {
+                        let body_stage = evaluate_body_matchers(cfg, &body, start);
+                        enforce_max_rtt(cfg, body_stage, start)
+                    }
                     Err(e) => {
                         let hint = e.hint();
                         let mut msg = format_error_chain(&e);
@@ -224,7 +233,7 @@ pub(super) async fn probe(url: &Url, expect: &StatusRange, ctx: AttemptCtx) -> V
                     }
                 }
             } else {
-                ok_stage(StageKind::Http, start.elapsed())
+                enforce_max_rtt(cfg, ok_stage(StageKind::Http, start.elapsed()), start)
             }
         }
         Err(e) if e.is_timeout() => err_stage(
@@ -247,6 +256,30 @@ pub(super) async fn probe(url: &Url, expect: &StatusRange, ctx: AttemptCtx) -> V
 
 const fn needs_body_inspection(cfg: &HttpConfig) -> bool {
     cfg.body_substring.is_some() || cfg.body_regex.is_some() || cfg.body_json_match.is_some()
+}
+
+/// Convert an otherwise-ok stage into a `slow-response` failure when the
+/// response time exceeded `cfg.max_rtt`. Pass-through for stages that are
+/// already an error so we never mask the original failure.
+fn enforce_max_rtt(cfg: &HttpConfig, stage: Stage, start: Instant) -> Stage {
+    let Some(limit) = cfg.max_rtt else {
+        return stage;
+    };
+    if !matches!(stage.result, crate::diagnostic::StageResult::Ok) {
+        return stage;
+    }
+    let elapsed = start.elapsed();
+    if elapsed <= limit {
+        return stage;
+    }
+    let elapsed_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+    let limit_ms = u64::try_from(limit.as_millis()).unwrap_or(u64::MAX);
+    err_stage(
+        StageKind::Http,
+        elapsed,
+        format!("response ok but took {elapsed_ms}ms, max-rtt is {limit_ms}ms"),
+        Some(hints::HTTP_SLOW_RESPONSE),
+    )
 }
 
 fn evaluate_header_expectations(
