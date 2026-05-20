@@ -126,6 +126,10 @@ pub(crate) mod hints {
     pub(crate) const K8S_PROTOCOL: &str =
         "unexpected response shape from the Kubernetes API server";
     pub(crate) const K8S_JOB_FAILED: &str = "job reported Failed=True, this will not recover by waiting, check pod logs and the BackoffLimit setting";
+    pub(crate) const WS_NO_CONNECT: &str =
+        "could not open TCP connection to the WebSocket endpoint, check host and port";
+    pub(crate) const WS_HANDSHAKE: &str = "TCP connected but the WebSocket handshake failed, server may not speak the WebSocket protocol on this path";
+    pub(crate) const WS_TLS: &str = "wss:// handshake failed, verify server cert and SNI";
 }
 
 impl Hintable for std::io::Error {
