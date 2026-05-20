@@ -59,7 +59,18 @@ pub(crate) fn resolve(input: &str) -> Result<Cow<'_, str>> {
             .find("${")
             .map_or(input.len(), |off| cursor + 2 + off);
         let Some(rel_end) = input[cursor + 2..search_end].rfind('}') else {
-            bail!("unterminated placeholder in target string at byte offset {cursor}");
+            // No closing brace before the next `${` (or end of input).
+            // Could be an unknown-kind placeholder whose argument
+            // contains a literal `${`. Per the module contract we leave
+            // unknown placeholders alone, so emit `${` verbatim and
+            // continue scanning. Only bail for the truly unterminated
+            // case where there is no `}` anywhere after the cursor.
+            if !input[cursor + 2..].contains('}') {
+                bail!("unterminated placeholder in target string at byte offset {cursor}");
+            }
+            out.push_str("${");
+            cursor += 2;
+            continue;
         };
         let close = cursor + 2 + rel_end;
         let body = &input[cursor + 2..close];
@@ -154,6 +165,14 @@ mod tests {
     fn unknown_kind_left_untouched() {
         let r = resolve("scheme://x/${vault:foo}/y").unwrap();
         assert_eq!(r, "scheme://x/${vault:foo}/y");
+    }
+
+    #[test]
+    fn unknown_kind_with_nested_brace_is_untouched() {
+        // Unknown placeholder kinds must pass through even when their
+        // argument syntax happens to embed another `${`.
+        let r = resolve("scheme://x/${vault:ns/${key}}/y").unwrap();
+        assert_eq!(r, "scheme://x/${vault:ns/${key}}/y");
     }
 
     #[test]

@@ -120,9 +120,19 @@ async fn run(args: Args) -> Result<ExitStatus> {
     let resolved_targets: Vec<String> = raw_targets
         .iter()
         .map(|s| {
-            secret::resolve(s)
+            let resolved = secret::resolve(s)
                 .map(std::borrow::Cow::into_owned)
-                .with_context(|| format!("resolving secrets in `{s}`"))
+                .with_context(|| format!("resolving secrets in `{s}`"))?;
+            // Re-enforce MAX_TARGET_LEN after substitution. The pre-resolve
+            // check ran on a possibly-short placeholder; a long env var or
+            // file content could blow past the cap and we don't want a
+            // single secret to push us into many-megabyte target strings.
+            if resolved.len() > MAX_TARGET_LEN {
+                bail!(
+                    "resolved target exceeds {MAX_TARGET_LEN} bytes (was `{s}` before substitution)"
+                );
+            }
+            Ok(resolved)
         })
         .collect::<Result<_>>()?;
     let mut targets: Vec<Target> = resolved_targets
