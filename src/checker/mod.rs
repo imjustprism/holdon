@@ -44,15 +44,6 @@ mod websocket;
 
 pub(crate) use hint::{Hintable, hints};
 
-/// Per-attempt context passed from [`crate::Runner`] down to each checker.
-///
-/// Carries the wall-clock budget the runner is willing to spend on a single
-/// probe attempt. Checkers should honour this value when wiring driver
-/// timeouts (connect, server selection, query) so a slow target cannot stall
-/// the overall deadline.
-///
-/// The struct is `#[non_exhaustive]`. Future per-attempt knobs can land
-/// without breaking downstream pattern matches.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct AttemptCtx {

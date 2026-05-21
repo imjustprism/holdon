@@ -9,8 +9,6 @@ use crate::target::ProcessSelector;
 pub(super) async fn probe(selector: &ProcessSelector, _ctx: AttemptCtx) -> Vec<Stage> {
     let start = Instant::now();
     let selector = selector.clone();
-    // sysinfo does blocking syscalls (read /proc on linux, NtQuerySystemInformation
-    // on windows). Push it onto the blocking pool so it cannot stall the runtime.
     let stage = tokio::task::spawn_blocking(move || lookup(&selector, start))
         .await
         .unwrap_or_else(|_| {
@@ -25,9 +23,6 @@ pub(super) async fn probe(selector: &ProcessSelector, _ctx: AttemptCtx) -> Vec<S
 }
 
 fn lookup(selector: &ProcessSelector, start: Instant) -> Stage {
-    // Empty constructor — sysinfo would otherwise pre-scan the entire
-    // process table during construction. Each branch performs exactly one
-    // scan with the scope it needs.
     let mut sys = System::new_with_specifics(RefreshKind::new());
     match selector {
         ProcessSelector::Pid(pid) => {
@@ -49,8 +44,6 @@ fn lookup(selector: &ProcessSelector, start: Instant) -> Stage {
             }
         }
         ProcessSelector::Name(name) => {
-            // Ask for the exe path so the fallback in `matches_name` can
-            // recover Linux `comm` values, which are capped at 15 bytes.
             sys.refresh_processes_specifics(
                 ProcessesToUpdate::All,
                 false,
@@ -95,8 +88,6 @@ fn matches_name(proc: &sysinfo::Process, wanted: &str) -> bool {
 }
 
 fn strip_exe_suffix(s: &str) -> Option<&str> {
-    // Windows process names retain the `.exe` suffix. Allow operators to
-    // write `process://chrome` instead of `process://chrome.exe`.
     let len = s.len();
     if len > 4 && s.as_bytes()[len - 4] == b'.' && s[len - 3..].eq_ignore_ascii_case("exe") {
         s.get(..len - 4)

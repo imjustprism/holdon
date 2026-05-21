@@ -108,8 +108,6 @@ fn parse_header_pair(input: &str) -> Result<HeaderPair, String> {
     Ok(HeaderPair { name, value })
 }
 
-/// Reject webhook URLs at parse time so a typo surfaces immediately
-/// instead of after the full readiness wait completes.
 #[cfg(feature = "http")]
 fn parse_webhook_url(input: &str) -> Result<String, String> {
     let parsed = url::Url::parse(input).map_err(|e| format!("invalid URL: {e}"))?;
@@ -255,36 +253,51 @@ pub(crate) struct Args {
     #[arg(long, env = "HOLDON_NO_JITTER", action = clap::ArgAction::SetTrue)]
     pub(crate) no_jitter: bool,
 
-    /// After every target is ready, keep probing forever and print a one-line
-    /// message whenever a target transitions ready->fail or fail->ready.
-    /// Exits cleanly on SIGINT/SIGTERM with the matching signal code.
-    #[arg(long, env = "HOLDON_WATCH", action = clap::ArgAction::SetTrue)]
+    #[arg(
+        long,
+        env = "HOLDON_WATCH",
+        action = clap::ArgAction::SetTrue,
+        help = "After every target is ready, keep probing and report ready<->fail transitions until SIGINT/SIGTERM"
+    )]
     pub(crate) watch: bool,
 
-    /// Polling interval used by --watch. Defaults to 5s.
-    #[arg(long, env = "HOLDON_WATCH_INTERVAL", value_parser = holdon::parse_duration, default_value = "5s")]
+    #[arg(
+        long,
+        env = "HOLDON_WATCH_INTERVAL",
+        value_parser = holdon::parse_duration,
+        default_value = "5s",
+        help = "Polling interval used by --watch"
+    )]
     pub(crate) watch_interval: Duration,
 
-    /// POST a JSON summary to this URL once the run's success condition
-    /// is met (every target ready, or `--at-least N` satisfied if set).
-    /// Body has an `event` field (`ready` or `fail`), an `elapsed_ms`
-    /// number, and a `targets` array of `{idx, target, satisfied,
-    /// attempts}` objects. Webhook failures are logged to stderr but
-    /// never affect the exit code.
     #[cfg(feature = "http")]
-    #[arg(long, env = "HOLDON_ON_READY", value_name = "URL", value_parser = parse_webhook_url)]
+    #[arg(
+        long,
+        env = "HOLDON_ON_READY",
+        value_name = "URL",
+        value_parser = parse_webhook_url,
+        help = "POST a JSON summary to this URL once the run's success condition is met"
+    )]
     pub(crate) on_ready: Option<String>,
 
-    /// POST a JSON summary to this URL when the deadline expires before
-    /// the success condition is met. Same schema as --on-ready with
-    /// `event = "fail"`.
     #[cfg(feature = "http")]
-    #[arg(long, env = "HOLDON_ON_FAIL", value_name = "URL", value_parser = parse_webhook_url)]
+    #[arg(
+        long,
+        env = "HOLDON_ON_FAIL",
+        value_name = "URL",
+        value_parser = parse_webhook_url,
+        help = "POST a JSON summary to this URL when the deadline expires before success"
+    )]
     pub(crate) on_fail: Option<String>,
 
-    /// Per-webhook timeout. Defaults to 5s.
     #[cfg(feature = "http")]
-    #[arg(long, env = "HOLDON_WEBHOOK_TIMEOUT", value_parser = holdon::parse_duration, default_value = "5s")]
+    #[arg(
+        long,
+        env = "HOLDON_WEBHOOK_TIMEOUT",
+        value_parser = holdon::parse_duration,
+        default_value = "5s",
+        help = "Per-webhook timeout"
+    )]
     pub(crate) webhook_timeout: Duration,
 
     #[arg(long, env = "HOLDON_TIMEOUT_EXIT_CODE", default_value_t = crate::DEFAULT_TIMEOUT_EXIT_CODE)]
@@ -314,12 +327,14 @@ pub(crate) struct Args {
     )]
     pub(crate) data: Option<String>,
 
-    /// Soft upper bound on the HTTP response time. A response that is
-    /// otherwise acceptable but slower than this is reported as
-    /// not-ready with an explicit SLA message. Separate from the hard
-    /// --attempt-timeout that also covers DNS, TCP, and TLS.
     #[cfg(feature = "http")]
-    #[arg(long, env = "HOLDON_MAX_RTT", value_parser = holdon::parse_duration, value_name = "DUR")]
+    #[arg(
+        long,
+        env = "HOLDON_MAX_RTT",
+        value_parser = holdon::parse_duration,
+        value_name = "DUR",
+        help = "Soft SLA on the HTTP response time; slower responses are reported not-ready"
+    )]
     pub(crate) max_rtt: Option<Duration>,
 
     #[cfg(feature = "http")]

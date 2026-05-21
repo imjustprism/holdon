@@ -33,9 +33,6 @@ fn sslmode_disabled(url: &Url) -> bool {
     })
 }
 
-/// Rewrite `ssl-mode` to `REQUIRED` when TLS is requested but the URL leaves
-/// it implicit or asks for `PREFERRED` (which lets the server downgrade to
-/// plaintext and leak the SASL password).
 fn enforce_sslmode(url: &Url, want_tls: bool) -> Url {
     if !want_tls {
         return url.clone();

@@ -8,16 +8,6 @@ use crate::checker::AttemptCtx;
 use crate::diagnostic::CheckOutcome;
 use crate::target::Target;
 
-/// Direction the runner moves towards readiness.
-///
-/// `Wait` is the default. The probe keeps retrying until the target reports
-/// ready, the overall deadline expires, or the consecutive-success threshold
-/// is reached.
-///
-/// `Reverse` flips the condition. The probe keeps retrying until the target
-/// reports NOT ready. Useful for teardown scripts that need to confirm a
-/// port has stopped listening or a service has finished draining before
-/// they move on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum Direction {
@@ -26,15 +16,6 @@ pub enum Direction {
     Reverse,
 }
 
-/// Whether targets are probed concurrently or one after another.
-///
-/// `Parallel` is the default. Every target runs in its own task and shares
-/// the overall deadline. Total wall-clock is bounded by the slowest target.
-///
-/// `Sequential` walks the input in order. Each target consumes whatever time
-/// remains under the overall deadline. Useful when a later target depends on
-/// the previous one already being up, or when you want predictable log
-/// output without interleaving.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum Schedule {
@@ -43,17 +24,6 @@ pub enum Schedule {
     Sequential,
 }
 
-/// Knobs controlling how a [`Runner`] schedules and bounds probes.
-///
-/// Construct with [`RunnerConfig::default`] and chain the builder methods to
-/// override individual fields. Durations are best-effort. An in-flight probe
-/// can overshoot the overall deadline by up to `attempt_timeout` because
-/// running probes are not interrupted mid-attempt.
-///
-/// Retries use exponential backoff. Starting at `initial_interval`, each
-/// failed attempt doubles the wait, clamped to `max_interval`. With `jitter`
-/// enabled the actual wait is sampled uniformly from `[0, current]` to avoid
-/// thundering-herd lockstep across coordinated restarts.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct RunnerConfig {
@@ -67,87 +37,31 @@ pub struct RunnerConfig {
     pub schedule: Schedule,
     pub success_threshold: u32,
     pub jitter: bool,
-    /// Optional per-target direction overrides. When set, index `i` is
-    /// used for the target at position `i` in the run-targets vec and
-    /// the global `direction` field is ignored for that target. Extra
-    /// entries beyond the targets vec are silently truncated, missing
-    /// entries fall back to the global `direction`.
     pub directions: Option<Vec<Direction>>,
-    /// Optional per-target overrides for retry-loop timing knobs. When
-    /// set, index `i` carries optional overrides for the target at
-    /// position `i`. Each [`TargetOverrides`] field is independent, so a
-    /// caller can override `attempt_timeout` for one target while
-    /// leaving `interval` and `success_threshold` at their globals.
     pub overrides: Option<Vec<TargetOverrides>>,
 }
 
-/// Per-target overrides for retry-loop timing knobs.
-///
-/// Each field is optional. `None` means "inherit the global value from
-/// [`RunnerConfig`]". `Some(_)` replaces that single field for the
-/// target at the matching index.
-///
-/// The struct is `#[non_exhaustive]`. New per-target knobs can land
-/// without breaking external pattern matches.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct TargetOverrides {
-    /// Initial retry interval applied before backoff doubling. Floors
-    /// to [`RunnerConfig::MIN_INTERVAL`] just like the global setting.
     pub interval: Option<Duration>,
-    /// Per-attempt wall-clock budget for one probe.
     pub attempt_timeout: Option<Duration>,
-    /// Consecutive-success threshold. Values < 1 are clamped to 1.
     pub success_threshold: Option<u32>,
 }
 
 impl RunnerConfig {
-    /// Default total wall-clock budget for a [`Runner::run`] call.
-    ///
-    /// Thirty seconds is enough for most container start-up readiness checks
-    /// without leaving CI jobs stuck on a misconfigured target forever.
     pub const DEFAULT_OVERALL_TIMEOUT: Duration = Duration::from_secs(30);
 
-    /// Default first retry interval after a failed probe.
-    ///
-    /// One hundred milliseconds is fast enough to catch local services that
-    /// finish booting in under a second without hammering the target with
-    /// hundreds of probes per second.
     pub const DEFAULT_INITIAL_INTERVAL: Duration = Duration::from_millis(100);
 
-    /// Default upper bound on the exponential backoff between retries.
-    ///
-    /// Two seconds keeps the runner responsive on slow services without
-    /// letting the wait grow into the tens of seconds where users start
-    /// thinking the tool has hung.
     pub const DEFAULT_MAX_INTERVAL: Duration = Duration::from_secs(2);
 
-    /// Default delay applied before the very first probe fires.
-    ///
-    /// Zero by default. Useful values are short delays that match a known
-    /// minimum start-up cost on the target side, where probing earlier just
-    /// wastes attempts.
     pub const DEFAULT_INITIAL_DELAY: Duration = Duration::ZERO;
 
-    /// Default per-attempt timeout for one full probe.
-    ///
-    /// Bounds the time a single probe can spend on DNS, TCP, TLS, and the
-    /// protocol roundtrip. Five seconds is the rough median for healthy
-    /// services on local networks and cloud load balancers.
     pub const DEFAULT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(5);
 
-    /// Default consecutive-success threshold before a target is satisfied.
-    ///
-    /// One means the first ready probe wins. Higher values protect against
-    /// flapping services that briefly report ready and then fall over again
-    /// during their warm-up phase.
     pub const DEFAULT_SUCCESS_THRESHOLD: u32 = 1;
 
-    /// Floor applied to interval and attempt-timeout knobs.
-    ///
-    /// A zero-millisecond interval would spin the retry loop without giving
-    /// the OS a chance to schedule the next attempt. One millisecond is the
-    /// smallest value that still lets the runtime breathe.
     pub const MIN_INTERVAL: Duration = Duration::from_millis(1);
 }
 
@@ -230,19 +144,12 @@ impl RunnerConfig {
         self
     }
 
-    /// Set per-target direction overrides. The slice index aligns with
-    /// the targets vec passed to [`Runner::run`]. Pass `None` to fall
-    /// back to the single global `direction`.
     #[must_use]
     pub fn directions(mut self, v: Option<Vec<Direction>>) -> Self {
         self.directions = v;
         self
     }
 
-    /// Set per-target retry-loop overrides. The slice index aligns with
-    /// the targets vec passed to [`Runner::run`]. Pass `None` (or
-    /// per-entry `None` fields) to inherit the global values for each
-    /// knob.
     #[must_use]
     pub fn overrides(mut self, v: Option<Vec<TargetOverrides>>) -> Self {
         self.overrides = v;
@@ -250,28 +157,12 @@ impl RunnerConfig {
     }
 }
 
-/// Drives a set of [`Target`] probes to completion under a single deadline.
-///
-/// Construct via [`Runner::new`] from a [`RunnerConfig`], then await
-/// [`Runner::run`] with the list of targets and an optional event sink. The
-/// `Runner` is consumed by `run` so a single instance cannot be reused.
-///
-/// The runner does not interrupt probes mid-attempt. The overall deadline
-/// applies between attempts. Worst case overshoot is one `attempt_timeout`
-/// past the deadline.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Runner {
     cfg: RunnerConfig,
 }
 
-/// Per-target slice of a [`Report`].
-///
-/// Holds the original input index so callers can correlate results back to
-/// the order they passed in, even when parallel probes finished out of
-/// order. `satisfied` already factors in the direction and the
-/// success-threshold gate, so library code only needs to inspect this one
-/// field to decide whether the target is done.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct TargetReport {
@@ -282,15 +173,6 @@ pub struct TargetReport {
     pub satisfied: bool,
 }
 
-/// Aggregate outcome of a [`Runner::run`] call.
-///
-/// Contains one [`TargetReport`] per input target, sorted by input order,
-/// plus the total wall-clock time the run consumed. Use [`Report::all_ready`]
-/// for a quick boolean answer or [`Report::assert_all_ready`] when you want
-/// the run to surface a typed [`crate::Error::NotReady`] on partial success.
-///
-/// The report does not retain attempt-level events. Subscribe to the
-/// [`EventSink`] passed into [`Runner::run`] if you need per-attempt data.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Report {
@@ -317,16 +199,6 @@ impl Report {
     }
 }
 
-/// Event emitted by [`Runner::run`] over the optional [`EventSink`].
-///
-/// Workers emit events from spawned tasks, so consumers must drain the
-/// receiver concurrently with `run` to avoid back-pressure stalling the
-/// runner. The default channel is unbounded for now, see [`EventSink`].
-///
-/// `Attempt` fires after every probe attempt with the latency and immediate
-/// ready bit. `Finished` fires once per target when its retry loop ends,
-/// either because the target satisfied its readiness condition or because
-/// the deadline elapsed.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum Event {
@@ -346,13 +218,6 @@ pub enum Event {
     },
 }
 
-/// Channel sender used to receive [`Event`]s during a run.
-///
-/// This is an unbounded sender. Slow consumers (a stalled terminal, a piped
-/// JSON consumer that blocks on flush) will grow memory proportional to
-/// attempt rate times target count. Drain promptly. A future major release
-/// is expected to swap this for a bounded channel with a documented drop
-/// policy.
 pub type EventSink = UnboundedSender<Event>;
 
 impl Runner {

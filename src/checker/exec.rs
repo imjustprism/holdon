@@ -138,9 +138,6 @@ fn first_nonempty_line(buf: &[u8]) -> String {
     for line in s.lines() {
         let t = line.trim();
         if !t.is_empty() {
-            // Truncate by chars, not bytes. `&t[..take]` panicked when the
-            // cap fell inside a multi-byte UTF-8 sequence (any non-ASCII
-            // stderr from the child process).
             let truncated: String = t.chars().take(STDERR_SNIPPET_MAX).collect();
             return sanitize_for_terminal(&truncated);
         }
@@ -154,9 +151,6 @@ mod tests {
 
     #[test]
     fn first_nonempty_line_handles_multibyte_at_truncation_boundary() {
-        // 300 "é" chars, each 2 bytes -> 600 bytes total. With the old byte
-        // slice this panicked because byte 200 falls between the two bytes
-        // of an é.
         let stderr: Vec<u8> = "é".repeat(300).into_bytes();
         let line = first_nonempty_line(&stderr);
         assert!(line.chars().count() <= STDERR_SNIPPET_MAX);

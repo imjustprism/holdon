@@ -11,10 +11,6 @@ pub(super) async fn probe(path: &Path, mode: FileMode, ctx: AttemptCtx) -> Vec<S
     if let Some(stage) = stat_once(path, mode, start).await {
         return vec![stage];
     }
-    // Initial state did not match. With the notify-fs feature, register an
-    // OS-level watcher on the parent directory and react to the matching
-    // create/remove event without polling. Without the feature, fall
-    // through to a single err_stage so the runner retries with backoff.
     #[cfg(feature = "notify-fs")]
     {
         if let Some(stage) = wait_for_event(path, mode, ctx, start).await {
@@ -70,21 +66,10 @@ async fn wait_for_event(
     use tokio::time::timeout;
 
     let parent = path.parent().filter(|p| !p.as_os_str().is_empty())?;
-    // Use the async metadata API: std::path::Path::is_dir calls the
-    // sync fs::metadata syscall, which would stall the Tokio worker on
-    // a slow or network-mounted filesystem.
     let parent_is_dir = tokio::fs::metadata(parent).await.is_ok_and(|m| m.is_dir());
     if !parent_is_dir {
-        // No usable directory to watch (e.g. /missing/file). Fall back
-        // to the polling path.
         return None;
     }
-    // Notify coalesces multiple wakeups into one and never drops a
-    // signal as long as the consumer eventually awaits notified()
-    // again. We do not need to inspect individual events because the
-    // post-event re-stat is authoritative for both create and remove,
-    // and the cost of one extra stat per spurious wakeup is much
-    // smaller than the cost of missing the one event we care about.
     let bell = Arc::new(Notify::new());
     let kicker = bell.clone();
     let mut watcher: RecommendedWatcher = match notify::recommended_watcher(move |_res| {
@@ -97,8 +82,6 @@ async fn wait_for_event(
         return None;
     }
 
-    // Re-stat after registering. Closes the race where the file changed
-    // state between the first stat and the watcher being armed.
     if let Some(stage) = stat_once(path, mode, start).await {
         return Some(vec![stage]);
     }

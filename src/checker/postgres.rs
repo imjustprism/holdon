@@ -33,12 +33,6 @@ fn sslmode_disabled(url: &Url) -> bool {
         .any(|(k, v)| k.eq_ignore_ascii_case("sslmode") && v.eq_ignore_ascii_case("disable"))
 }
 
-/// Force `sslmode=require` when TLS is requested but the URL leaves the floor
-/// implicit (`prefer`/`allow`/missing). Without this, libpq semantics let a
-/// MITM strip TLS by responding `N` to the SSL request, then the driver
-/// silently sends the password in cleartext on the same socket.
-///
-/// Explicit `require`/`verify-ca`/`verify-full` are passed through untouched.
 fn enforce_sslmode(url: &Url, want_tls: bool) -> Url {
     if !want_tls {
         return url.clone();

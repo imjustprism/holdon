@@ -1,24 +1,3 @@
-//! Kubernetes resource readiness probe.
-//!
-//! Talks to the Kubernetes API server over HTTPS using either:
-//!
-//! * the in-pod service-account credentials at
-//!   `/var/run/secrets/kubernetes.io/serviceaccount/` (auto-detected when
-//!   `KUBERNETES_SERVICE_HOST` is set, as it always is inside a pod), or
-//! * an explicit `KUBE_SERVER` + `KUBE_TOKEN` pair, with an optional
-//!   `KUBE_CA_PATH` pointing at a PEM bundle for non-default cluster CAs.
-//!
-//! Reports ready when:
-//!
-//! * `pod`: `.status.conditions[type == "Ready"].status == "True"`
-//! * `deployment`: `.status.conditions[type == "Available"].status == "True"`
-//!   and `.status.observedGeneration >= .metadata.generation`
-//! * `job`: `.status.conditions[type == "Complete"].status == "True"`
-//!
-//! Full kubeconfig YAML parsing is intentionally out of scope for this
-//! initial version. Run from inside a pod for native cluster access, or
-//! plumb the explicit env vars from any wrapper script during dev.
-
 use std::time::Instant;
 
 use reqwest::Certificate;
@@ -155,9 +134,6 @@ fn check_ready(kind: K8sKind, v: &serde_json::Value) -> Result<(), ProbeError> {
 }
 
 fn check_job(v: &serde_json::Value) -> Result<(), ProbeError> {
-    // Scan for Failed=True first so a job that hit its backoff limit
-    // surfaces a permanent-failure message instead of being retried by
-    // the runner until the overall timeout fires.
     if let Some(conditions) = v.pointer("/status/conditions").and_then(|c| c.as_array()) {
         for cond in conditions {
             let Some(ct) = cond.get("type").and_then(|t| t.as_str()) else {
@@ -183,12 +159,6 @@ fn check_job(v: &serde_json::Value) -> Result<(), ProbeError> {
 }
 
 fn check_condition(v: &serde_json::Value, want: &str, label: &str) -> Result<(), ProbeError> {
-    // Kubernetes only populates .status.conditions once at least one
-    // terminal-ish condition (Ready, Available, Complete, Failed) is set.
-    // A freshly created Job in particular returns an empty status object
-    // until pods start. Surfacing this as NotReady is accurate for all
-    // three resource kinds, where Protocol would mislead the user into
-    // looking for an API server problem.
     let conditions = v
         .pointer("/status/conditions")
         .and_then(|c| c.as_array())
