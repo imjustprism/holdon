@@ -32,18 +32,23 @@ enum ProbeError {
     NotHealthy { name: String, status: String },
     #[error("container `{0}` logs do not yet match the expected pattern")]
     LogMismatch(String),
+    #[error("container `{0}` log tail exceeded the 2 MiB read cap")]
+    LogTooLarge(String),
+    #[error("Docker engine response exceeded the read cap")]
+    CapExceeded,
 }
 
 impl ProbeError {
     const fn hint(&self) -> &'static str {
         match self {
             Self::Connect(_) => hints::DOCKER_NO_SOCKET,
-            Self::Protocol(_) => hints::DOCKER_PROTOCOL,
+            Self::Protocol(_) | Self::CapExceeded => hints::DOCKER_PROTOCOL,
             Self::NotFound(_) => hints::DOCKER_NO_SUCH,
             Self::WrongState { .. } => hints::DOCKER_NOT_RUNNING,
             Self::NoHealthcheck(_) => hints::DOCKER_NO_HEALTHCHECK,
             Self::NotHealthy { .. } => hints::DOCKER_UNHEALTHY,
             Self::LogMismatch(_) => hints::DOCKER_LOG_NOT_FOUND,
+            Self::LogTooLarge(_) => hints::DOCKER_LOG_TOO_LARGE,
         }
     }
 }
@@ -118,7 +123,12 @@ async fn fetch_logs(name: &str) -> Result<Vec<u8>, ProbeError> {
         tail = LOG_TAIL,
         ver = env!("CARGO_PKG_VERSION"),
     );
-    let raw = transport::round_trip(request.as_bytes(), LOG_READ_CAP).await?;
+    let raw = transport::round_trip(request.as_bytes(), LOG_READ_CAP)
+        .await
+        .map_err(|e| match e {
+            ProbeError::CapExceeded => ProbeError::LogTooLarge(name.to_owned()),
+            other => other,
+        })?;
     let (status, body) = parse_response_bytes(&raw)?;
     match status {
         200 => Ok(body),
@@ -372,9 +382,7 @@ async fn read_capped<R: AsyncReadExt + Unpin>(
             let mut overflow = [0u8; 1];
             return match reader.read(&mut overflow).await {
                 Ok(0) => Ok(buf),
-                Ok(_) => Err(ProbeError::Protocol(format!(
-                    "Docker engine response exceeded {cap} bytes"
-                ))),
+                Ok(_) => Err(ProbeError::CapExceeded),
                 Err(e) => Err(ProbeError::Connect(format!(
                     "reading response: {}",
                     io_kind(&e)
