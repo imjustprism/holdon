@@ -127,6 +127,7 @@ pub enum Target {
     },
     Ws {
         url: Url,
+        expect: Option<LogMatcher>,
     },
     Process {
         selector: ProcessSelector,
@@ -237,6 +238,7 @@ impl Default for StatusRange {
 }
 
 impl fmt::Debug for Target {
+    #[allow(clippy::too_many_lines)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Tcp { host, port } => f
@@ -332,7 +334,11 @@ impl fmt::Debug for Target {
                 .field("namespace", namespace)
                 .field("name", name)
                 .finish(),
-            Self::Ws { url } => f.debug_struct("Ws").field("url", &redact(url)).finish(),
+            Self::Ws { url, expect } => f
+                .debug_struct("Ws")
+                .field("url", &redact(url))
+                .field("expect", expect)
+                .finish(),
             Self::Process { selector } => f
                 .debug_struct("Process")
                 .field("selector", selector)
@@ -359,8 +365,17 @@ impl fmt::Display for Target {
             | Self::Mongodb { url }
             | Self::Rabbitmq { url, .. }
             | Self::Kafka { url, .. }
-            | Self::Temporal { url }
-            | Self::Ws { url } => write!(f, "{}", redact(url)),
+            | Self::Temporal { url } => write!(f, "{}", redact(url)),
+            Self::Ws { url, expect } => {
+                write!(f, "{}", redact(url))?;
+                match expect {
+                    None => Ok(()),
+                    Some(LogMatcher::Substring(s)) => write!(f, "?expect-text={}", encode_arg(s)),
+                    Some(LogMatcher::Regex(re)) => {
+                        write!(f, "?expect-regex={}", encode_arg(re.as_str()))
+                    }
+                }
+            }
             Self::Docker { name, expect } => {
                 write!(f, "docker://{name}")?;
                 let first = if let Some(s) = &expect.state {
@@ -458,6 +473,78 @@ fn validate_sql_identifier(input: &str, name: &str, scheme: &str) -> Result<(), 
         }
     }
     Ok(())
+}
+
+fn extract_ws_expect(input: &str, url: &Url) -> Result<Option<LogMatcher>> {
+    let mut needle: Option<String> = None;
+    let mut pattern: Option<String> = None;
+    for (k, v) in url.query_pairs() {
+        match k.as_ref() {
+            "expect-text" => {
+                if needle.is_some() {
+                    return Err(parse_err(
+                        input,
+                        "ws:// `?expect-text` may appear at most once",
+                    ));
+                }
+                if v.is_empty() {
+                    return Err(parse_err(input, "ws:// `?expect-text` cannot be empty"));
+                }
+                needle = Some(v.into_owned());
+            }
+            "expect-regex" => {
+                if pattern.is_some() {
+                    return Err(parse_err(
+                        input,
+                        "ws:// `?expect-regex` may appear at most once",
+                    ));
+                }
+                if v.is_empty() {
+                    return Err(parse_err(input, "ws:// `?expect-regex` cannot be empty"));
+                }
+                pattern = Some(v.into_owned());
+            }
+            other => {
+                return Err(parse_err(
+                    input,
+                    &format!(
+                        "unknown ws:// query key `{other}` (only `expect-text` or `expect-regex` supported)"
+                    ),
+                ));
+            }
+        }
+    }
+    match (needle, pattern) {
+        (Some(_), Some(_)) => Err(parse_err(
+            input,
+            "ws:// `?expect-text` and `?expect-regex` are mutually exclusive",
+        )),
+        (Some(s), None) => Ok(Some(LogMatcher::Substring(s))),
+        (None, Some(p)) => {
+            let re = regex_lite::Regex::new(&p)
+                .map_err(|e| parse_err(input, &format!("invalid ws:// regex: {e}")))?;
+            Ok(Some(LogMatcher::Regex(std::sync::Arc::new(re))))
+        }
+        (None, None) => Ok(None),
+    }
+}
+
+fn drop_ws_expect_query(url: &Url) -> Url {
+    let kept: Vec<(String, String)> = url
+        .query_pairs()
+        .filter(|(k, _)| k.as_ref() != "expect-text" && k.as_ref() != "expect-regex")
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    let mut out = url.clone();
+    if kept.is_empty() {
+        out.set_query(None);
+    } else {
+        let q = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(kept.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+            .finish();
+        out.set_query(Some(&q));
+    }
+    out
 }
 
 fn extract_redis_expect(input: &str, url: &Url) -> Result<Option<RedisKeyExpect>> {
@@ -933,10 +1020,9 @@ impl FromStr for Target {
                 Hostname::new(host)?;
                 url.port_or_known_default()
                     .ok_or_else(|| Error::MissingPort(scrub_target_input(input)))?;
-                if url.query().is_some() {
-                    return Err(parse_err(input, "ws:// does not accept query parameters"));
-                }
-                Ok(Self::Ws { url })
+                let expect = extract_ws_expect(input, &url)?;
+                let url = drop_ws_expect_query(&url);
+                Ok(Self::Ws { url, expect })
             }
             other => Err(Error::UnsupportedScheme(other.into())),
         }
@@ -1351,8 +1437,9 @@ mod tests {
         assert!(matches!(t, Target::Ws { .. }));
         let t: Target = "wss://example.com/socket".parse().unwrap();
         match &t {
-            Target::Ws { url } => {
+            Target::Ws { url, expect } => {
                 assert_eq!(url.port_or_known_default(), Some(443));
+                assert!(expect.is_none());
             }
             _ => panic!("expected Ws"),
         }
@@ -1362,7 +1449,7 @@ mod tests {
     }
 
     #[test]
-    fn ws_rejects_query() {
+    fn ws_rejects_unknown_query() {
         assert!("ws://host:1/path?foo=bar".parse::<Target>().is_err());
     }
 
@@ -1370,6 +1457,66 @@ mod tests {
     fn ws_missing_port_for_plain_ws_is_default_80() {
         assert!("ws://host/p".parse::<Target>().is_ok());
         assert!("wss://host/p".parse::<Target>().is_ok());
+    }
+
+    #[test]
+    fn ws_expect_text() {
+        let t: Target = "ws://host:9000/p?expect-text=hello".parse().unwrap();
+        match t {
+            Target::Ws { expect, .. } => match expect {
+                Some(LogMatcher::Substring(s)) => assert_eq!(s, "hello"),
+                _ => panic!("expected Substring matcher"),
+            },
+            _ => panic!("expected Ws"),
+        }
+    }
+
+    #[test]
+    fn ws_expect_regex() {
+        let t: Target = "ws://host:9000/p?expect-regex=%5E%5Cd%2B%24"
+            .parse()
+            .unwrap();
+        match t {
+            Target::Ws { expect, .. } => match expect {
+                Some(LogMatcher::Regex(re)) => assert_eq!(re.as_str(), "^\\d+$"),
+                _ => panic!("expected Regex matcher"),
+            },
+            _ => panic!("expected Ws"),
+        }
+    }
+
+    #[test]
+    fn ws_expect_text_and_regex_mutually_exclusive() {
+        assert!(
+            "ws://h:1/p?expect-text=a&expect-regex=b"
+                .parse::<Target>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn ws_expect_empty_rejected() {
+        assert!("ws://h:1/p?expect-text=".parse::<Target>().is_err());
+        assert!("ws://h:1/p?expect-regex=".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn ws_expect_bad_regex_rejected() {
+        assert!("ws://h:1/p?expect-regex=%5B".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn ws_display_drops_expect_when_none() {
+        let t: Target = "ws://host:9000/p".parse().unwrap();
+        let s = format!("{t}");
+        assert!(!s.contains("expect"), "got: {s}");
+    }
+
+    #[test]
+    fn ws_display_includes_expect_text() {
+        let t: Target = "ws://host:9000/p?expect-text=hi".parse().unwrap();
+        let s = format!("{t}");
+        assert!(s.contains("expect-text=hi"), "got: {s}");
     }
 
     #[test]
