@@ -130,6 +130,12 @@ pub(crate) mod hints {
         "could not open TCP connection to the WebSocket endpoint, check host and port";
     pub(crate) const WS_HANDSHAKE: &str = "TCP connected but the WebSocket handshake failed, server may not speak the WebSocket protocol on this path";
     pub(crate) const WS_TLS: &str = "wss:// handshake failed, verify server cert and SNI";
+    pub(crate) const WS_NO_MESSAGE: &str =
+        "websocket connected but server closed the connection before sending a message";
+    pub(crate) const WS_MESSAGE_MISMATCH: &str =
+        "websocket received a message but it did not match the supplied matcher";
+    pub(crate) const WS_BINARY_MESSAGE: &str =
+        "websocket received a non-text frame, cannot match against ?expect-text or ?expect-regex";
     pub(crate) const PROCESS_NO_PID: &str =
         "no process with that pid is running yet, it may not have spawned";
     pub(crate) const PROCESS_NO_NAME: &str =

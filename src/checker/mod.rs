@@ -132,7 +132,7 @@ impl Target {
             #[cfg(not(feature = "k8s"))]
             Self::K8s { .. } => disabled_stage(StageKind::K8s, "k8s"),
             #[cfg(feature = "websocket")]
-            Self::Ws { url } => websocket::probe(url, ctx).await,
+            Self::Ws { url, expect } => websocket::probe(url, expect.as_ref(), ctx).await,
             #[cfg(not(feature = "websocket"))]
             Self::Ws { .. } => disabled_stage(StageKind::Ws, "websocket"),
             #[cfg(feature = "process")]

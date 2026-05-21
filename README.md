@@ -139,6 +139,7 @@ The argument after `--` is the command to run once every target is ready. holdon
 | `log:///path?match=...`         | Wait for a substring or regex to appear in a local log file (last 1 MiB) |
 | `exec://program?arg=...`        | External command, ready iff exit `0`      |
 | `process://<pid>`, `process://<name>` | Process exists by PID or by executable name (Windows strips `.exe`) |
+| `ws://`, `wss://`               | WebSocket handshake. Optional `?expect-text=NEEDLE` or `?expect-regex=PATTERN` waits for the first frame and matches against it |
 
 ## Feature flags
 

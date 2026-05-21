@@ -61,7 +61,7 @@ temporal = ["grpc"]
 docker = ["dep:serde_json"]
 k8s = ["http"]
 notify-fs = ["dep:notify"]
-websocket = ["dep:tokio-tungstenite", "dep:rustls", "dep:webpki-roots"]
+websocket = ["dep:tokio-tungstenite", "dep:rustls", "dep:webpki-roots", "dep:futures-util"]
 process = ["dep:sysinfo"]
 json-output = ["dep:serde_json"]
 all-databases = ["postgres", "redis", "mysql", "mongodb"]
@@ -163,6 +163,7 @@ tokio-tungstenite = { version = "0.28", default-features = false, features = [
   "handshake",
 ], optional = true }
 sysinfo = { version = "0.32", default-features = false, features = ["system"], optional = true }
+futures-util = { version = "0.3", default-features = false, features = ["std"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.44.2", features = ["test-util", "rt-multi-thread", "macros", "net", "time", "io-util"] }
