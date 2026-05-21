@@ -21,14 +21,6 @@ const FAILURE_BODY_SNIPPET_BYTES: usize = 240;
 const SERVER_HINT_HEADERS: &[&str] = &["server", "x-powered-by", "via"];
 const SERVER_HINT_VALUE_MAX: usize = 80;
 
-/// Minimum TLS protocol version accepted by HTTPS probes.
-///
-/// `V12` is the default and matches the current IETF guidance, which
-/// deprecates TLS 1.0 and 1.1. `V13` opts into a strict floor for callers
-/// that want to refuse anything older than TLS 1.3.
-///
-/// The setting applies to every HTTPS target probed by the shared
-/// reqwest client. There is no per-target override.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum TlsMin {
     #[default]
@@ -45,24 +37,10 @@ impl TlsMin {
     }
 }
 
-/// Process-wide HTTP request configuration applied to every `http(s)://` probe.
-///
-/// Set once from the CLI layer via [`set_global`] before the first probe.
-/// Library users that need per-target overrides can leave this unset and use
-/// the defaults.
 #[derive(Debug, Default, Clone)]
 pub struct HttpConfig {
     pub headers: HeaderMap,
     pub method: Method,
-    /// Disable TLS certificate verification for every HTTPS probe this
-    /// process runs.
-    ///
-    /// The setting applies process-wide because the HTTP client is
-    /// initialized once via an `OnceLock`. There is no per-target
-    /// override: enabling `insecure` on any single target disables
-    /// verification for every later HTTPS probe in the same process.
-    /// Library callers that need per-target control must run probes in
-    /// separate processes.
     pub insecure: bool,
     pub follow_redirects: bool,
     pub body_substring: Option<String>,
@@ -74,11 +52,6 @@ pub struct HttpConfig {
     pub client_identity_pem: Option<Vec<u8>>,
     pub header_expectations: Vec<(HeaderName, regex_lite::Regex)>,
     pub http2_prior_knowledge: bool,
-    /// Soft upper bound on the response time. When set, a probe that
-    /// receives an otherwise acceptable response slower than this
-    /// duration is reported as not-ready with a clear "exceeded SLA"
-    /// message. Lets a holdon gate fail before promoting a slow
-    /// dependency, separate from the hard `attempt_timeout`.
     pub max_rtt: Option<std::time::Duration>,
 }
 
@@ -161,11 +134,6 @@ fn client() -> &'static Client {
                 }
             }
         }
-        // No silent fallback to Client::new(): the default client drops
-        // min_tls, custom CAs, and the client identity, which would
-        // weaken security policy invisibly. Surface the reqwest error
-        // so the user knows their flags broke the build. This is a
-        // process-fatal misconfiguration, not a per-probe failure.
         #[allow(clippy::panic)]
         match b.build() {
             Ok(c) => c,
@@ -258,9 +226,6 @@ const fn needs_body_inspection(cfg: &HttpConfig) -> bool {
     cfg.body_substring.is_some() || cfg.body_regex.is_some() || cfg.body_json_match.is_some()
 }
 
-/// Convert an otherwise-ok stage into a `slow-response` failure when the
-/// response time exceeded `cfg.max_rtt`. Pass-through for stages that are
-/// already an error so we never mask the original failure.
 fn enforce_max_rtt(cfg: &HttpConfig, stage: Stage, start: Instant) -> Stage {
     let Some(limit) = cfg.max_rtt else {
         return stage;

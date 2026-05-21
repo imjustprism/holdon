@@ -49,11 +49,6 @@ pub fn redact_in(text: &str, secret: &str) -> String {
     redact_userinfo(&out)
 }
 
-/// Replace any `scheme://user:password@` URL userinfo with `scheme://***:***@`.
-///
-/// Defense in depth: catches password leaks even when the secret string is
-/// not known to the caller (e.g. a driver echoes a percent-decoded form, or
-/// a different secret slips through).
 #[must_use]
 pub fn redact_userinfo(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -172,7 +167,6 @@ mod tests {
 
     #[test]
     fn rejects_overflow_distinct_from_never() {
-        // 1e11 hours * 3600s/h * 1e6 us/s = 3.6e20 us, well above MAX_F64_MICROS (~9.2e18).
         let err = parse_duration("100000000000h").unwrap_err();
         assert!(err.contains("too large"), "got: {err}");
         assert!(err.contains("never"), "got: {err}");

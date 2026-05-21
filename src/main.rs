@@ -93,12 +93,7 @@ async fn run(args: Args) -> Result<ExitStatus> {
         std::iter::repeat_n(None, raw_targets.len()).collect();
     let mut per_target_overrides: Vec<config::PerTargetOverride> =
         std::iter::repeat_n(config::PerTargetOverride::default(), raw_targets.len()).collect();
-    // config_data.names lines up with config_data.targets entries (the
-    // legacy targets array plus any [[check]] blocks, in file order).
-    // Splice it in starting after the positional CLI targets.
     let config_target_count = raw_targets.len() - cli_count;
-    // parse_durations guarantees config_data.names.len() == config_data.targets.len(),
-    // so once we know there are config-provided targets we can splice straight in.
     if config_target_count > 0 {
         for (i, n) in config_data
             .names
@@ -134,10 +129,6 @@ async fn run(args: Args) -> Result<ExitStatus> {
             let resolved = secret::resolve(s)
                 .map(std::borrow::Cow::into_owned)
                 .with_context(|| format!("resolving secrets in `{s}`"))?;
-            // Re-enforce MAX_TARGET_LEN after substitution. The pre-resolve
-            // check ran on a possibly-short placeholder; a long env var or
-            // file content could blow past the cap and we don't want a
-            // single secret to push us into many-megabyte target strings.
             if resolved.len() > MAX_TARGET_LEN {
                 bail!(
                     "resolved target exceeds {MAX_TARGET_LEN} bytes (was `{s}` before substitution)"
@@ -146,10 +137,6 @@ async fn run(args: Args) -> Result<ExitStatus> {
             Ok(resolved)
         })
         .collect::<Result<_>>()?;
-    // Surface the ORIGINAL raw target string in the parse-error context,
-    // not the resolved one. Otherwise a failure to parse a target with
-    // `${env:SECRET}` would print the substituted value (and CI log
-    // collectors would capture it).
     let mut targets: Vec<Target> = resolved_targets
         .iter()
         .zip(raw_targets.iter())
@@ -272,9 +259,6 @@ async fn run(args: Args) -> Result<ExitStatus> {
         )
         .jitter(!args.no_jitter && config_data.jitter.unwrap_or(true));
 
-    // Per-target direction overrides from [[check]] blocks. None means
-    // "inherit the global direction set above". Some(true) flips
-    // polarity for that one target.
     let global_reverse = args.reverse || config_data.reverse.unwrap_or(false);
     let has_per_target = per_target_reverse.iter().any(Option::is_some);
     let cfg = if has_per_target {
@@ -397,10 +381,6 @@ async fn run(args: Args) -> Result<ExitStatus> {
         }
         let targets_for_watch: Vec<Target> =
             report.results.iter().map(|r| r.target.clone()).collect();
-        // Seed last_ready from each target's actual final state so a
-        // partial-readiness run under --at-least does not produce
-        // spurious "ready -> fail" transitions on the first tick for
-        // targets that were never satisfied.
         let initial_ready: Vec<bool> = report.results.iter().map(|r| r.satisfied).collect();
         let watch_reverse: Vec<bool> = per_target_reverse
             .iter()
@@ -425,10 +405,6 @@ async fn run(args: Args) -> Result<ExitStatus> {
         .await;
         let sig = interrupted.load(Ordering::SeqCst);
         return Ok(if sig == SIG_NONE {
-            // watch_loop returned without an interrupt. This is only
-            // possible when the loop refused to start (zero interval is
-            // already handled above, so this is defensive). Treat as
-            // misuse rather than masquerading as a SIGINT exit.
             ExitStatus::Misuse
         } else {
             ExitStatus::Signal(signal_exit_code(sig))
@@ -641,14 +617,6 @@ fn install_panic_hook() {
     }));
 }
 
-/// POST a JSON summary of the final run state to the operator-supplied
-/// URL. Best-effort: any failure (DNS, TCP, TLS, HTTP error, timeout)
-/// is logged to stderr and never affects the exit code, so a hook URL
-/// outage cannot block a deploy script that uses holdon as a gate.
-///
-/// The body is a small fixed schema deliberately separate from the
-/// `--output json` event stream, because JSON-output consumers and
-/// webhook receivers usually want different shapes.
 #[cfg(feature = "http")]
 async fn fire_webhook(url: &str, ready: bool, report: &holdon::Report, timeout: Duration) {
     use serde_json::json;
@@ -690,14 +658,6 @@ async fn fire_webhook(url: &str, ready: bool, report: &holdon::Report, timeout: 
     }
 }
 
-/// Continuously re-probe every target on a fixed interval and write a
-/// one-line stderr message whenever a target transitions ready->fail or
-/// fail->ready. Returns when SIGINT/SIGTERM fires.
-///
-/// Entered only after the initial run has reported every target as ready.
-/// The starting per-target state is therefore `true`. The function never
-/// returns under normal operation; the caller is expected to translate
-/// the interrupt into an exit code.
 async fn watch_loop(
     targets: Vec<Target>,
     initial_ready: Vec<bool>,
@@ -711,9 +671,6 @@ async fn watch_loop(
     if last_ready.len() != targets.len() {
         last_ready.resize(targets.len(), true);
     }
-    // Caller validates watch_interval before reaching this function.
-    // Belt-and-braces: refuse a zero interval here too so a library-style
-    // future caller cannot crash tokio::time::interval.
     if interval.is_zero() {
         let _ = writeln!(
             std::io::stderr(),
@@ -728,8 +685,6 @@ async fn watch_loop(
     );
     let mut ticker = tokio::time::interval(interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    // First tick fires immediately; drop it so we wait one full interval
-    // after entering watch mode before reprobing.
     ticker.tick().await;
     loop {
         tokio::select! {
@@ -749,11 +704,6 @@ async fn watch_loop(
                     }
                     set.spawn(async move {
                         let outcome = target.probe(probe_ctx).await;
-                        // Match runner.rs Direction::Reverse: invert
-                        // the raw probe result so "ready" means
-                        // "satisfied the user's intent", per the
-                        // per-target direction that was used during
-                        // the initial run.
                         let ready = if reverse {
                             !outcome.is_ready()
                         } else {
@@ -767,9 +717,6 @@ async fn watch_loop(
                     tokio::select! {
                         biased;
                         _ = wait_interrupt(interrupted) => {
-                            // Abort outstanding probes so the user does not
-                            // wait up to attempt_timeout for the slowest one
-                            // before the process can exit.
                             set.abort_all();
                             aborted = true;
                             break;

@@ -7,11 +7,6 @@
     clippy::manual_let_else
 )]
 
-//! Behavioural coverage for the `--max-rtt` SLA gate. Lives in its own
-//! integration-test file because `holdon::checker::http::set_global`
-//! uses a `OnceLock`, so the `HttpConfig` can only be initialised once
-//! per process and must be set before any probe runs.
-
 mod common;
 
 use std::time::Duration;
@@ -23,9 +18,6 @@ use holdon::runner::RunnerConfig;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-/// Returns a 200 OK after `delay` so we can drive the elapsed time past
-/// the configured `--max-rtt`. The accept loop runs until the listener
-/// is dropped at the end of the test.
 async fn spawn_slow_http_server(delay: Duration) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();

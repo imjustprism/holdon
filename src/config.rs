@@ -22,11 +22,6 @@ pub(crate) struct ConfigFile {
     pub at_least: Option<usize>,
     #[serde(default)]
     pub targets: Vec<String>,
-    /// `[[check]]` blocks appended to `targets` in file order. Each block
-    /// names a single readiness target and may carry future per-check
-    /// overrides. Only `name` and `target` are recognised today; other keys
-    /// are rejected at parse time so a typo in a future override key cannot
-    /// silently degrade to the global setting.
     #[serde(default)]
     pub check: Vec<CheckEntry>,
 }
@@ -34,26 +29,11 @@ pub(crate) struct ConfigFile {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CheckEntry {
-    /// Optional label printed in the banner. Empty strings are rejected
-    /// so an accidental `name = ""` cannot disable labelling silently.
     pub name: Option<String>,
-    /// Target string in the same syntax as positional CLI arguments.
     pub target: String,
-    /// Per-target direction: `"up"` (wait until ready, default) or
-    /// `"down"` (wait until NOT ready). Lets a single run mix
-    /// must-be-ready and must-be-down targets, which the global
-    /// `--reverse` flag cannot express.
     pub direction: Option<String>,
-    /// Initial retry interval applied before exponential backoff
-    /// doubling, e.g. `"500ms"`. Overrides the global `interval` for
-    /// this one target.
     pub interval: Option<String>,
-    /// Per-attempt wall-clock budget for one probe, e.g. `"30s"`.
-    /// Overrides the global `attempt_timeout` for this one target.
     pub attempt_timeout: Option<String>,
-    /// Consecutive-success threshold before the target is considered
-    /// satisfied. Overrides the global `success_threshold` for this
-    /// one target. Values < 1 are rejected at parse time.
     pub success_threshold: Option<u32>,
 }
 
@@ -71,17 +51,8 @@ pub(crate) struct Resolved {
     pub once: Option<bool>,
     pub at_least: Option<usize>,
     pub targets: Vec<String>,
-    /// One entry per target in `targets`, in the same order. `None`
-    /// for positional CLI targets and `targets = [...]` entries that
-    /// carry no label, `Some` for `[[check]]` blocks with `name`.
     pub names: Vec<Option<String>>,
-    /// One entry per target in `targets`. `None` means "fall back to
-    /// the global direction", `Some(true)` flips polarity (wait for
-    /// the target to be NOT ready).
     pub reverse_per_target: Vec<Option<bool>>,
-    /// One entry per target in `targets`. Each tuple holds optional
-    /// per-target overrides for `interval`, `attempt_timeout`, and
-    /// `success_threshold`. Indices align with `targets`.
     pub overrides_per_target: Vec<PerTargetOverride>,
 }
 
@@ -121,9 +92,6 @@ pub(crate) fn load(explicit: Option<&Path>) -> Result<Resolved> {
     let contents = std::fs::read_to_string(&path)
         .with_context(|| format!("reading config file {}", path.display()))?;
     let raw: ConfigFile = if was_auto_detected {
-        // Strip the toml crate's source-snippet from the error chain so an
-        // auto-loaded file (which the user may not have intended us to read)
-        // cannot leak its contents into our diagnostics.
         toml::from_str(&contents)
             .map_err(|e| anyhow::anyhow!("parsing TOML in {}: {}", path.display(), e.message()))?
     } else {
@@ -132,10 +100,6 @@ pub(crate) fn load(explicit: Option<&Path>) -> Result<Resolved> {
     parse_durations(raw, &path)
 }
 
-/// Look for a `holdon.toml` or `.holdon.toml` regular file in the current
-/// working directory. Symlinks are intentionally rejected so a hostile CWD
-/// cannot redirect us to read another file (for example `/etc/passwd`) and
-/// then surface its content in a parse error message.
 fn auto_detect() -> Option<PathBuf> {
     let cwd = std::env::current_dir().ok()?;
     for name in AUTO_DETECT_NAMES {

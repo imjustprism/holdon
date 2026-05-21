@@ -1,16 +1,3 @@
-//! Docker container readiness probe.
-//!
-//! Talks to the Docker engine API over its local IPC socket (Unix socket on
-//! Linux/macOS, named pipe on Windows) and inspects a single container.
-//! Reports ready when the container reaches the expected `State.Status`
-//! (default `running`) and, if `?healthy=true` was requested, also has a
-//! healthcheck reporting `healthy`.
-//!
-//! The module deliberately avoids pulling in a heavy Docker client crate.
-//! It speaks raw HTTP/1.1 over the engine socket because the only call we
-//! need is `GET /containers/{name}/json`, which has a stable shape across
-//! every supported engine version.
-
 use std::time::Instant;
 
 use tokio::io::AsyncReadExt;
@@ -128,10 +115,6 @@ async fn inspect(name: &str) -> Result<String, ProbeError> {
     }
 }
 
-/// Characters that must be percent-encoded when interpolated into the URL
-/// path. Docker container names are restricted to `[a-zA-Z0-9_.-]`, but the
-/// API also accepts container IDs (hex) and we want to fail explicitly with
-/// a 404 rather than smuggling unexpected bytes into the request line.
 const PATH_SAFE: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
     .add(b' ')
     .add(b'"')
@@ -203,9 +186,6 @@ fn decode_chunked(body: &[u8]) -> Result<String, ProbeError> {
         }
         out.extend_from_slice(&body[cursor..cursor + size]);
         cursor += size;
-        // RFC 9112: each chunk ends with CRLF after the data. Validate it
-        // explicitly so a truncation between chunks surfaces a precise
-        // error instead of a downstream "invalid chunk size" message.
         if cursor + 2 > body.len() || &body[cursor..cursor + 2] != b"\r\n" {
             return Err(ProbeError::Protocol("chunk missing trailing CRLF".into()));
         }
@@ -269,13 +249,6 @@ mod transport {
         super::read_capped(&mut stream).await
     }
 
-    /// Resolve the engine socket path.
-    ///
-    /// Honours `DOCKER_HOST` when it points at a Unix socket (`unix://...`).
-    /// Any other scheme (`tcp://`, `ssh://`, `npipe://`, ...) is refused so
-    /// a CI environment that exports `DOCKER_HOST=tcp://docker:2375` does
-    /// not silently fall through to the local-daemon socket and return
-    /// results from the wrong engine.
     fn socket_path() -> Result<PathBuf, ProbeError> {
         match std::env::var("DOCKER_HOST") {
             Ok(host) if host.is_empty() => Ok(PathBuf::from("/var/run/docker.sock")),
@@ -310,11 +283,6 @@ mod transport {
         super::read_capped(&mut stream).await
     }
 
-    /// Resolve the engine named-pipe path.
-    ///
-    /// Honours `DOCKER_HOST` when it points at a named pipe (`npipe://...`).
-    /// Any other scheme is refused rather than falling through to the
-    /// default pipe.
     fn pipe_path() -> Result<String, ProbeError> {
         match std::env::var("DOCKER_HOST") {
             Ok(host) if host.is_empty() => Ok(r"\\.\pipe\docker_engine".to_owned()),
@@ -336,9 +304,6 @@ async fn read_capped<R: AsyncReadExt + Unpin>(reader: &mut R) -> Result<Vec<u8>,
     let mut chunk = [0u8; 4096];
     loop {
         if buf.len() == HTTP_READ_CAP {
-            // Buffer holds exactly the cap. Peek one more byte to tell an
-            // exact-fit response apart from one that exceeds the cap and
-            // would otherwise be silently truncated.
             let mut overflow = [0u8; 1];
             return match reader.read(&mut overflow).await {
                 Ok(0) => Ok(buf),
@@ -387,7 +352,6 @@ mod tests {
 
     #[test]
     fn parses_chunked_response() {
-        // 0x1e = 30 = byte length of the JSON payload below
         let raw = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n1e\r\n{\"State\":{\"Status\":\"running\"}}\r\n0\r\n\r\n";
         let (status, body) = parse_response(raw).unwrap();
         assert_eq!(status, 200);

@@ -8,14 +8,6 @@ use crate::error::{Error, Result};
 
 const HOSTNAME_MAX_LEN: usize = 253;
 
-/// A validated hostname or IP literal.
-///
-/// Rejects empty strings, inputs over 253 bytes (RFC 1035 §2.3.4), and any
-/// Unicode control character (C0 0x00-0x1F, DEL 0x7F, and C1 0x80-0x9F).
-/// Does not enforce DNS label syntax beyond length and control rejection
-/// because the same type is used for IPv4 / IPv6 literals and DNS-only
-/// targets where the user intentionally passes an unusual hostname. The OS
-/// resolver makes the final call.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Hostname(Box<str>);
 
@@ -28,10 +20,6 @@ impl Hostname {
         if s.len() > HOSTNAME_MAX_LEN {
             return Err(parse_err(&s, "hostname exceeds 253 bytes"));
         }
-        // char::is_control covers C0 (0x00-0x1F), DEL (0x7F), and C1
-        // (0x80-0x9F). The previous byte-level filter only caught C0+DEL,
-        // letting C1 characters reach the terminal where some legacy
-        // emulators still interpret them as ANSI escape introducers.
         if s.chars().any(char::is_control) {
             return Err(parse_err(&s, "hostname contains control characters"));
         }
@@ -62,18 +50,6 @@ impl AsRef<str> for Hostname {
     }
 }
 
-/// A parsed readiness target.
-///
-/// Construct via [`str::parse`] from a CLI-style string, then pass to
-/// [`crate::Runner::run`].
-///
-/// Accepted shapes (see the [`FromStr`] impl for the full grammar):
-/// `:5432`, `host:5432`, `[::1]:5432`, `tcp://host:5432`, `tcp:host:5432`,
-/// `http(s)://...`, `postgres(ql)://...`, `redis(s)://...`, `mysql://...`,
-/// `dns://host`, `file:///abs/path[?mode=absent]`, `exec://program[?arg=...]`.
-///
-/// `Display` redacts URL passwords to `***`. The custom `Debug` impl does the
-/// same so `?target` in tracing or panic messages cannot leak secrets.
 #[derive(Clone)]
 #[non_exhaustive]
 pub enum Target {
@@ -157,12 +133,6 @@ pub enum Target {
     },
 }
 
-/// Process readiness selector.
-///
-/// Built from `process://<pid>` or `process://<name>`. A purely numeric host
-/// component parses as `Pid`. Anything else parses as `Name`, in which case
-/// the probe scans the running process table for a match against the process
-/// executable name (extension-stripped on Windows).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ProcessSelector {
@@ -170,10 +140,6 @@ pub enum ProcessSelector {
     Name(String),
 }
 
-/// Kinds of Kubernetes resource that [`Target::K8s`] knows how to probe.
-///
-/// New kinds can land without breaking external pattern matches that use a
-/// wildcard arm because the enum is `#[non_exhaustive]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum K8sKind {
@@ -193,31 +159,13 @@ impl K8sKind {
     }
 }
 
-/// Container state expectations for a [`Target::Docker`] target.
-///
-/// Built from the query string of a `docker://<name>` URL. Empty defaults
-/// mean "container exists and is `running`". Setting `healthy = true`
-/// additionally requires the container to have a healthcheck and to be
-/// reporting `healthy`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct DockerExpect {
-    /// Required `State.Status`. Defaults to `running`. Set via
-    /// `?state=running|paused|exited|created|restarting|removing|dead`.
     pub state: Option<String>,
-    /// When true, require `State.Health.Status == "healthy"`. The container
-    /// must have a HEALTHCHECK defined or the probe fails.
     pub require_healthy: bool,
 }
 
-/// Matcher applied to log file content by [`Target::Log`].
-///
-/// The probe reads the trailing window of the file and tests this matcher
-/// against the bytes. `Substring` does a literal byte search. `Regex` uses
-/// the parse-time-compiled `regex_lite` pattern.
-///
-/// The enum is `#[non_exhaustive]`. New matcher kinds can land without
-/// breaking external pattern matches that already use a wildcard arm.
 #[derive(Clone)]
 #[non_exhaustive]
 pub enum LogMatcher {
@@ -234,16 +182,6 @@ impl fmt::Debug for LogMatcher {
     }
 }
 
-/// Redis key existence assertion with an optional value matcher.
-///
-/// Built from `?key=NAME` on a `redis://` target, optionally combined with
-/// either `?match=NEEDLE` for a substring check or `?regex=PATTERN` for a
-/// regex check. The two value matchers are mutually exclusive and both
-/// require the `key` parameter.
-///
-/// At probe time the checker runs `GET key`. A missing key fails the probe
-/// regardless of matcher. If a matcher is set, the returned value is
-/// decoded as UTF-8 (lossily) and tested against the substring or regex.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct RedisKeyExpect {
@@ -251,15 +189,6 @@ pub struct RedisKeyExpect {
     pub matcher: Option<LogMatcher>,
 }
 
-/// Whether a [`Target::File`] check waits for a path to exist or to vanish.
-///
-/// `Present` is the default. The probe reports ready when the path exists
-/// and is reachable via `symlink_metadata`. Useful for waiting on init
-/// scripts that drop a file once a service is up.
-///
-/// `Absent` is selected via `?mode=absent` on the URL. The probe reports
-/// ready when the path is gone. Useful for teardown checks that wait for a
-/// pid file or lock file to disappear before continuing.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FileMode {
@@ -268,10 +197,6 @@ pub enum FileMode {
     Absent,
 }
 
-/// Inclusive HTTP status code range that counts as ready.
-///
-/// Default is `200..=299` (strict 2xx). 3xx are not considered ready by
-/// default to avoid masking misconfigured load balancers and edge redirects.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct StatusRange {
@@ -1029,7 +954,6 @@ const DOCKER_STATES: &[&str] = &[
 ];
 
 fn parse_docker_target(input: &str, url: &Url) -> Result<Target> {
-    // docker://<container-name>[/][?state=running][?healthy=true]
     let host = url
         .host_str()
         .ok_or_else(|| parse_err(input, "docker:// requires a container name"))?;
@@ -1037,9 +961,6 @@ fn parse_docker_target(input: &str, url: &Url) -> Result<Target> {
     let name = if path.is_empty() {
         host.to_owned()
     } else {
-        // Container names cannot contain `/`. A non-empty path is
-        // therefore always a user error and should fail at parse time
-        // rather than reaching the daemon and returning 404.
         return Err(parse_err(
             input,
             "docker:// expected docker://<container> (no path segments)",
@@ -1089,8 +1010,6 @@ fn parse_docker_target(input: &str, url: &Url) -> Result<Target> {
 }
 
 fn parse_k8s_target(input: &str, url: &Url) -> Result<Target> {
-    // k8s://<kind>/<namespace>/<name>
-    // host is <kind>, path is /<namespace>/<name>
     let kind_raw = url
         .host_str()
         .ok_or_else(|| parse_err(input, "k8s:// requires <kind>/<namespace>/<name>"))?;
@@ -1135,9 +1054,6 @@ fn parse_k8s_target(input: &str, url: &Url) -> Result<Target> {
     })
 }
 
-/// RFC 1123 DNS subdomain: lowercase alphanumeric, `-`, and `.`, must start
-/// and end with alphanumeric, 1..=253 characters. Kubernetes resource and
-/// namespace names follow this rule.
 fn is_valid_k8s_name(s: &str) -> bool {
     if s.is_empty() || s.len() > 253 {
         return false;
@@ -1282,16 +1198,6 @@ fn parse_err(input: &str, reason: &str) -> Error {
     }
 }
 
-/// Scrub URL userinfo password and well-known secret query parameters from
-/// a user-supplied target string before embedding it in an `Error` variant.
-///
-/// `Error::Parse` and `Error::MissingPort` both quote the offending input in
-/// their `Display` output, so any leak there ends up in stderr, logs, and
-/// any tracing span that captures the error chain.
-///
-/// The output also has every C0, DEL, and C1 control character replaced with
-/// U+FFFD so a hostile target string cannot smuggle ANSI escape sequences
-/// through the "invalid target ..." fragment that callers print verbatim.
 fn scrub_target_input(input: &str) -> String {
     let scrubbed = scrub_query_secrets(&crate::util::redact_userinfo(input));
     scrubbed
@@ -1367,18 +1273,12 @@ mod tests {
 
     #[test]
     fn hostname_rejects_c1_control() {
-        // U+0085 (NEL) and U+009B (CSI) are C1 controls. Some legacy
-        // terminals interpret them like ESC[ when echoed.
         assert!(Hostname::new("evil\u{0085}host").is_err());
         assert!(Hostname::new("evil\u{009b}host").is_err());
     }
 
     #[test]
     fn parse_error_input_strips_control_chars() {
-        // The bare-host parser rejects an empty hostname before any
-        // control check could be reached, but feeding a control through a
-        // url-shaped target with a non-empty host name triggers the host
-        // validator, whose error wraps the user input via parse_err.
         let err = "evil\u{009b}host:80".parse::<Target>().unwrap_err();
         let msg = err.to_string();
         assert!(!msg.contains('\u{009b}'), "raw C1 still in: {msg}");
@@ -1456,7 +1356,6 @@ mod tests {
             }
             _ => panic!("expected Ws"),
         }
-        // Password is redacted in Display
         let with_pw: Target = "wss://user:hunter2@example.com/socket".parse().unwrap();
         let displayed = format!("{with_pw}");
         assert!(!displayed.contains("hunter2"), "got: {displayed}");
@@ -1469,9 +1368,6 @@ mod tests {
 
     #[test]
     fn ws_missing_port_for_plain_ws_is_default_80() {
-        // ws:// has a known default port (80) and wss:// has 443, so
-        // omitting the port is fine; only schemes with no default port
-        // need to error.
         assert!("ws://host/p".parse::<Target>().is_ok());
         assert!("wss://host/p".parse::<Target>().is_ok());
     }

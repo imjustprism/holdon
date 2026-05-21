@@ -6,11 +6,6 @@
     clippy::literal_string_with_formatting_args
 )]
 
-//! End-to-end coverage for the env-source secret resolver. Lives here
-//! because `std::env::set_var` is unsafe under Rust 2024 and the main
-//! binary forbids unsafe; integration tests have their own crate root
-//! and can opt in to unsafe.
-
 use std::process::Command;
 
 fn cmd() -> Command {
@@ -21,12 +16,6 @@ fn cmd() -> Command {
 
 #[test]
 fn env_placeholder_resolves_but_secret_value_never_logged() {
-    // Two guarantees:
-    //  1. Resolution happens before URL parsing (the env var is read).
-    //  2. The substituted value never appears in stderr, only the
-    //     original placeholder form. This is the contract that lets
-    //     operators safely use `${env:SECRET}` in CI without log
-    //     collectors capturing the secret.
     let out = cmd()
         .env("HOLDON_SECRET_TEST", "expanded-value-marker")
         .arg("--timeout")

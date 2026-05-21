@@ -47,10 +47,6 @@ pub(super) async fn probe(url: &Url, ctx: AttemptCtx) -> Vec<Stage> {
         )];
     }
     let conn_str = url.as_str().to_owned();
-    // Wrap the whole ping in attempt_timeout. The driver's
-    // server_selection_timeout and connect_timeout only cover later
-    // stages; mongodb+srv:// also performs unbounded DNS SRV lookups
-    // inside ClientOptions::parse before those timeouts apply.
     let stage = match timeout(ctx.attempt_timeout, ping(&conn_str, ctx)).await {
         Ok(Ok(())) => ok_stage(StageKind::Mongodb, start.elapsed()),
         Ok(Err(e)) => {
@@ -72,9 +68,6 @@ pub(super) async fn probe(url: &Url, ctx: AttemptCtx) -> Vec<Stage> {
     vec![stage]
 }
 
-/// Returns true when TLS will actually be in effect for the connection:
-/// `mongodb+srv://` always negotiates TLS by default, and `mongodb://` only
-/// uses TLS when the URI explicitly opts in via `tls=true`/`ssl=true`.
 fn mongo_tls_in_effect(url: &Url) -> bool {
     if url.scheme().eq_ignore_ascii_case("mongodb+srv") {
         return true;
