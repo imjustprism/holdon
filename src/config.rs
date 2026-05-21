@@ -44,6 +44,17 @@ pub(crate) struct CheckEntry {
     /// must-be-ready and must-be-down targets, which the global
     /// `--reverse` flag cannot express.
     pub direction: Option<String>,
+    /// Initial retry interval applied before exponential backoff
+    /// doubling, e.g. `"500ms"`. Overrides the global `interval` for
+    /// this one target.
+    pub interval: Option<String>,
+    /// Per-attempt wall-clock budget for one probe, e.g. `"30s"`.
+    /// Overrides the global `attempt_timeout` for this one target.
+    pub attempt_timeout: Option<String>,
+    /// Consecutive-success threshold before the target is considered
+    /// satisfied. Overrides the global `success_threshold` for this
+    /// one target. Values < 1 are rejected at parse time.
+    pub success_threshold: Option<u32>,
 }
 
 #[derive(Debug, Default)]
@@ -68,6 +79,35 @@ pub(crate) struct Resolved {
     /// the global direction", `Some(true)` flips polarity (wait for
     /// the target to be NOT ready).
     pub reverse_per_target: Vec<Option<bool>>,
+    /// One entry per target in `targets`. Each tuple holds optional
+    /// per-target overrides for `interval`, `attempt_timeout`, and
+    /// `success_threshold`. Indices align with `targets`.
+    pub overrides_per_target: Vec<PerTargetOverride>,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct PerTargetOverride {
+    pub interval: Option<Duration>,
+    pub attempt_timeout: Option<Duration>,
+    pub success_threshold: Option<u32>,
+}
+
+impl PerTargetOverride {
+    pub(crate) const fn is_some(&self) -> bool {
+        self.interval.is_some()
+            || self.attempt_timeout.is_some()
+            || self.success_threshold.is_some()
+    }
+}
+
+impl From<PerTargetOverride> for holdon::TargetOverrides {
+    fn from(o: PerTargetOverride) -> Self {
+        let mut t = Self::default();
+        t.interval = o.interval;
+        t.attempt_timeout = o.attempt_timeout;
+        t.success_threshold = o.success_threshold;
+        t
+    }
 }
 
 pub(crate) fn load(explicit: Option<&Path>) -> Result<Resolved> {
@@ -124,19 +164,22 @@ fn parse_durations(raw: ConfigFile, path: &Path) -> Result<Resolved> {
     let mut names: Vec<Option<String>> = std::iter::repeat_n(None, targets.len()).collect();
     let mut reverse_per_target: Vec<Option<bool>> =
         std::iter::repeat_n(None, targets.len()).collect();
+    let mut overrides_per_target: Vec<PerTargetOverride> =
+        std::iter::repeat_n(PerTargetOverride::default(), targets.len()).collect();
     for (i, entry) in raw.check.into_iter().enumerate() {
+        let one = i + 1;
         if entry.target.trim().is_empty() {
             bail!(
                 "{}: [[check]] #{i} has an empty target",
                 path.display(),
-                i = i + 1
+                i = one
             );
         }
         if entry.name.as_deref().is_some_and(|s| s.trim().is_empty()) {
             bail!(
                 "{}: [[check]] #{i} has an empty name (omit the field or set a value)",
                 path.display(),
-                i = i + 1
+                i = one
             );
         }
         let direction = match entry.direction.as_deref().map(str::to_ascii_lowercase) {
@@ -147,13 +190,34 @@ fn parse_durations(raw: ConfigFile, path: &Path) -> Result<Resolved> {
                 bail!(
                     "{}: [[check]] #{i} direction `{s}` invalid (expected `up` or `down`)",
                     path.display(),
-                    i = i + 1
+                    i = one
                 );
             }
+        };
+        let entry_interval = dur(
+            &format!("[[check]] #{one} interval"),
+            entry.interval.clone(),
+        )?;
+        let entry_attempt_timeout = dur(
+            &format!("[[check]] #{one} attempt_timeout"),
+            entry.attempt_timeout.clone(),
+        )?;
+        if entry.success_threshold == Some(0) {
+            bail!(
+                "{}: [[check]] #{i} success_threshold must be >= 1",
+                path.display(),
+                i = one
+            );
+        }
+        let override_entry = PerTargetOverride {
+            interval: entry_interval,
+            attempt_timeout: entry_attempt_timeout,
+            success_threshold: entry.success_threshold,
         };
         targets.push(entry.target);
         names.push(entry.name);
         reverse_per_target.push(direction);
+        overrides_per_target.push(override_entry);
     }
     Ok(Resolved {
         interval: dur("interval", raw.interval)?,
@@ -170,6 +234,7 @@ fn parse_durations(raw: ConfigFile, path: &Path) -> Result<Resolved> {
         targets,
         names,
         reverse_per_target,
+        overrides_per_target,
     })
 }
 
@@ -270,6 +335,56 @@ mod tests {
         let err = parse("[[check]]\ntarget = \":1\"\ndirection = \"sideways\"\n").unwrap_err();
         let full = format!("{err:#}");
         assert!(full.contains("sideways"), "got: {full}");
+    }
+
+    #[test]
+    fn check_interval_override_parsed() {
+        let r = parse("[[check]]\ntarget = \":1\"\ninterval = \"500ms\"\n").unwrap();
+        assert_eq!(r.overrides_per_target.len(), 1);
+        assert_eq!(
+            r.overrides_per_target[0].interval,
+            Some(Duration::from_millis(500))
+        );
+        assert!(r.overrides_per_target[0].attempt_timeout.is_none());
+        assert!(r.overrides_per_target[0].success_threshold.is_none());
+    }
+
+    #[test]
+    fn check_attempt_timeout_override_parsed() {
+        let r = parse("[[check]]\ntarget = \":1\"\nattempt_timeout = \"30s\"\n").unwrap();
+        assert_eq!(
+            r.overrides_per_target[0].attempt_timeout,
+            Some(Duration::from_secs(30))
+        );
+    }
+
+    #[test]
+    fn check_success_threshold_override_parsed() {
+        let r = parse("[[check]]\ntarget = \":1\"\nsuccess_threshold = 3\n").unwrap();
+        assert_eq!(r.overrides_per_target[0].success_threshold, Some(3));
+    }
+
+    #[test]
+    fn check_zero_success_threshold_rejected() {
+        let err = parse("[[check]]\ntarget = \":1\"\nsuccess_threshold = 0\n").unwrap_err();
+        let full = format!("{err:#}");
+        assert!(
+            full.contains("success_threshold must be >= 1"),
+            "got: {full}"
+        );
+    }
+
+    #[test]
+    fn check_bad_duration_rejected() {
+        let err = parse("[[check]]\ntarget = \":1\"\ninterval = \"forever\"\n").unwrap_err();
+        let full = format!("{err:#}");
+        assert!(full.contains("invalid"), "got: {full}");
+    }
+
+    #[test]
+    fn check_no_overrides_yields_empty_per_target() {
+        let r = parse("[[check]]\ntarget = \":1\"\n").unwrap();
+        assert!(!r.overrides_per_target[0].is_some());
     }
 
     #[test]

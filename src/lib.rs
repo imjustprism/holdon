@@ -12,6 +12,8 @@ pub mod target;
 pub mod util;
 
 pub use error::{Error, Result};
-pub use runner::{Direction, Event, Report, Runner, RunnerConfig, Schedule, TargetReport};
+pub use runner::{
+    Direction, Event, Report, Runner, RunnerConfig, Schedule, TargetOverrides, TargetReport,
+};
 pub use target::{Hostname, LogMatcher, ProcessSelector, RedisKeyExpect, Target};
 pub use util::parse_duration;

@@ -91,6 +91,8 @@ async fn run(args: Args) -> Result<ExitStatus> {
     let mut names: Vec<Option<String>> = std::iter::repeat_n(None, raw_targets.len()).collect();
     let mut per_target_reverse: Vec<Option<bool>> =
         std::iter::repeat_n(None, raw_targets.len()).collect();
+    let mut per_target_overrides: Vec<config::PerTargetOverride> =
+        std::iter::repeat_n(config::PerTargetOverride::default(), raw_targets.len()).collect();
     // config_data.names lines up with config_data.targets entries (the
     // legacy targets array plus any [[check]] blocks, in file order).
     // Splice it in starting after the positional CLI targets.
@@ -115,6 +117,15 @@ async fn run(args: Args) -> Result<ExitStatus> {
             .enumerate()
         {
             per_target_reverse[cli_count + i] = d;
+        }
+        for (i, o) in config_data
+            .overrides_per_target
+            .iter()
+            .take(config_target_count)
+            .copied()
+            .enumerate()
+        {
+            per_target_overrides[cli_count + i] = o;
         }
     }
     let resolved_targets: Vec<String> = raw_targets
@@ -283,6 +294,20 @@ async fn run(args: Args) -> Result<ExitStatus> {
         cfg
     };
 
+    let has_any_override = per_target_overrides
+        .iter()
+        .any(config::PerTargetOverride::is_some);
+    let cfg = if has_any_override {
+        let overrides: Vec<holdon::runner::TargetOverrides> = per_target_overrides
+            .iter()
+            .copied()
+            .map(Into::into)
+            .collect();
+        cfg.overrides(Some(overrides))
+    } else {
+        cfg
+    };
+
     let no_color_env = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
     let color =
         !args.no_color && !no_color_env && std::io::IsTerminal::is_terminal(&std::io::stderr());
@@ -377,21 +402,22 @@ async fn run(args: Args) -> Result<ExitStatus> {
         // spurious "ready -> fail" transitions on the first tick for
         // targets that were never satisfied.
         let initial_ready: Vec<bool> = report.results.iter().map(|r| r.satisfied).collect();
-        let mut attempt_ctx = holdon::checker::AttemptCtx::default();
-        attempt_ctx.attempt_timeout = cfg.attempt_timeout;
-        // Per-target reverse polarity matches the runner. Each entry
-        // falls back to the global reverse when no [[check]] direction
-        // override is set. Without this, a target with
-        // direction = "down" would be re-probed in watch mode with the
-        // wrong polarity and fire a spurious transition on tick one.
         let watch_reverse: Vec<bool> = per_target_reverse
             .iter()
             .map(|d| d.unwrap_or(global_reverse))
             .collect();
+        let watch_attempt_timeouts: Vec<Duration> = per_target_overrides
+            .iter()
+            .map(|o| {
+                o.attempt_timeout
+                    .unwrap_or(cfg.attempt_timeout)
+                    .max(RunnerConfig::MIN_INTERVAL)
+            })
+            .collect();
         watch_loop(
             targets_for_watch,
             initial_ready,
-            attempt_ctx,
+            watch_attempt_timeouts,
             args.watch_interval,
             watch_reverse,
             &interrupted,
@@ -675,7 +701,7 @@ async fn fire_webhook(url: &str, ready: bool, report: &holdon::Report, timeout: 
 async fn watch_loop(
     targets: Vec<Target>,
     initial_ready: Vec<bool>,
-    ctx: holdon::checker::AttemptCtx,
+    attempt_timeouts: Vec<Duration>,
     interval: Duration,
     reverse_per_target: Vec<bool>,
     interrupted: &Arc<AtomicU8>,
@@ -717,8 +743,12 @@ async fn watch_loop(
                 for (idx, target) in targets.iter().enumerate() {
                     let target = target.clone();
                     let reverse = reverse_per_target.get(idx).copied().unwrap_or(false);
+                    let mut probe_ctx = holdon::checker::AttemptCtx::default();
+                    if let Some(t) = attempt_timeouts.get(idx).copied() {
+                        probe_ctx.attempt_timeout = t;
+                    }
                     set.spawn(async move {
-                        let outcome = target.probe(ctx).await;
+                        let outcome = target.probe(probe_ctx).await;
                         // Match runner.rs Direction::Reverse: invert
                         // the raw probe result so "ready" means
                         // "satisfied the user's intent", per the

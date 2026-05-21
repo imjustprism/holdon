@@ -174,6 +174,77 @@ async fn once_makes_exactly_one_attempt() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn per_target_attempt_timeout_overrides_global() {
+    let (slow_listener, slow_port) = bind_ephemeral().await;
+    let _slow = tokio::spawn(async move {
+        loop {
+            let Ok((mut sock, _)) = slow_listener.accept().await else {
+                return;
+            };
+            tokio::spawn(async move {
+                let mut buf = [0u8; 1];
+                let _ = tokio::io::AsyncReadExt::read(&mut sock, &mut buf).await;
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            });
+        }
+    });
+    let target_slow: Target = format!("http://127.0.0.1:{slow_port}/").parse().unwrap();
+
+    let (l_open, port_open) = bind_ephemeral().await;
+    let _open = Box::leak(Box::new(l_open));
+    let target_open: Target = format!("127.0.0.1:{port_open}").parse().unwrap();
+
+    let mut ov_short = holdon::TargetOverrides::default();
+    ov_short.attempt_timeout = Some(Duration::from_millis(150));
+    let overrides = vec![ov_short, holdon::TargetOverrides::default()];
+    let cfg = RunnerConfig::default()
+        .timeout(Duration::from_secs(3))
+        .attempt_timeout(Duration::from_secs(10))
+        .once(true)
+        .overrides(Some(overrides));
+    let start = Instant::now();
+    let report = Runner::new(cfg)
+        .run(vec![target_slow, target_open], None)
+        .await;
+    let elapsed = start.elapsed();
+    assert!(!report.results[0].satisfied);
+    assert!(report.results[1].satisfied);
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "per-target attempt_timeout not honoured, elapsed={elapsed:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn per_target_success_threshold_overrides_global() {
+    let (_l, p) = bind_ephemeral().await;
+    let target: Target = format!("127.0.0.1:{p}").parse().unwrap();
+    let mut ov = holdon::TargetOverrides::default();
+    ov.success_threshold = Some(3);
+    ov.interval = Some(Duration::from_millis(5));
+    let cfg = RunnerConfig::default()
+        .timeout(Duration::from_secs(3))
+        .attempt_timeout(Duration::from_millis(200))
+        .success_threshold(1)
+        .jitter(false)
+        .overrides(Some(vec![ov]));
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let handle = tokio::spawn(Runner::new(cfg).run(vec![target], Some(tx)));
+    let mut attempts = 0u32;
+    while let Some(ev) = rx.recv().await {
+        if matches!(ev, Event::Attempt { .. }) {
+            attempts += 1;
+        }
+    }
+    let report = handle.await.unwrap();
+    assert!(report.all_ready());
+    assert!(
+        attempts >= 3,
+        "expected >=3 attempts to satisfy threshold, got {attempts}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn assert_all_ready_returns_not_ready_error() {
     let port = free_port().await;
     let target: Target = format!("127.0.0.1:{port}").parse().unwrap();
