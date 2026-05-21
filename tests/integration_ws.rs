@@ -16,6 +16,10 @@ use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 
 async fn spawn_echo_server(send: Option<String>) -> u16 {
+    spawn_server(send, false).await
+}
+
+async fn spawn_server(send: Option<String>, ping_first: bool) -> u16 {
     let (listener, port) = bind_ephemeral().await;
     tokio::spawn(async move {
         loop {
@@ -27,6 +31,9 @@ async fn spawn_echo_server(send: Option<String>) -> u16 {
                 let Ok(mut ws) = accept_async(stream).await else {
                     return;
                 };
+                if ping_first {
+                    let _ = ws.send(Message::Ping(vec![1, 2, 3].into())).await;
+                }
                 if let Some(s) = send_clone {
                     let _ = ws.send(Message::Text(s.into())).await;
                 }
@@ -66,6 +73,17 @@ async fn ws_expect_text_fails_on_mismatch() {
     let cfg = quick_cfg(800).interval(Duration::from_millis(50));
     let report = run(cfg, vec![target]).await;
     assert!(!report.all_ready());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ws_skips_ping_then_matches_data_frame() {
+    let port = spawn_server(Some("payload-after-ping".to_owned()), true).await;
+    let target: Target = format!("ws://127.0.0.1:{port}/?expect-text=payload")
+        .parse()
+        .unwrap();
+    let cfg = quick_cfg(3000);
+    let report = run(cfg, vec![target]).await;
+    assert!(report.all_ready());
 }
 
 #[tokio::test(flavor = "multi_thread")]

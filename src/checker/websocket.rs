@@ -46,36 +46,33 @@ async fn run(url: &Url, expect: Option<&LogMatcher>) -> Result<(), ProbeErr> {
         drop(stream);
         return Ok(());
     };
-    let frame = stream.next().await.ok_or_else(|| ProbeErr {
-        message: "connection closed before a message was received".to_owned(),
-        hint: hints::WS_NO_MESSAGE,
-    })?;
-    let msg = frame.map_err(|e| ProbeErr {
-        message: format_error_chain(&e),
-        hint: classify_error(&e),
-    })?;
-    let text = match msg {
-        Message::Text(t) => t.to_string(),
-        Message::Binary(b) => match std::str::from_utf8(&b) {
-            Ok(s) => s.to_owned(),
-            Err(_) => {
+    let text = loop {
+        let frame = stream.next().await.ok_or_else(|| ProbeErr {
+            message: "connection closed before a data frame was received".to_owned(),
+            hint: hints::WS_NO_MESSAGE,
+        })?;
+        let msg = frame.map_err(|e| ProbeErr {
+            message: format_error_chain(&e),
+            hint: classify_error(&e),
+        })?;
+        match msg {
+            Message::Text(t) => break t.to_string(),
+            Message::Binary(b) => match std::str::from_utf8(&b) {
+                Ok(s) => break s.to_owned(),
+                Err(_) => {
+                    return Err(ProbeErr {
+                        message: "first data frame was non-UTF-8 binary".to_owned(),
+                        hint: hints::WS_BINARY_MESSAGE,
+                    });
+                }
+            },
+            Message::Close(_) => {
                 return Err(ProbeErr {
-                    message: "first frame was non-UTF-8 binary".to_owned(),
-                    hint: hints::WS_BINARY_MESSAGE,
+                    message: "server sent Close before any data frame".to_owned(),
+                    hint: hints::WS_NO_MESSAGE,
                 });
             }
-        },
-        Message::Close(_) => {
-            return Err(ProbeErr {
-                message: "server sent Close before any data frame".to_owned(),
-                hint: hints::WS_NO_MESSAGE,
-            });
-        }
-        Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => {
-            return Err(ProbeErr {
-                message: "first frame was a control frame".to_owned(),
-                hint: hints::WS_NO_MESSAGE,
-            });
+            Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => {}
         }
     };
     let hit = match matcher {
