@@ -160,11 +160,12 @@ impl K8sKind {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct DockerExpect {
     pub state: Option<String>,
     pub require_healthy: bool,
+    pub log_match: Option<LogMatcher>,
 }
 
 #[derive(Clone)]
@@ -378,14 +379,30 @@ impl fmt::Display for Target {
             }
             Self::Docker { name, expect } => {
                 write!(f, "docker://{name}")?;
-                let first = if let Some(s) = &expect.state {
-                    write!(f, "?state={s}")?;
-                    false
-                } else {
-                    true
+                let mut first = true;
+                let mut sep = |f: &mut fmt::Formatter<'_>| -> fmt::Result {
+                    write!(f, "{}", if first { "?" } else { "&" })?;
+                    first = false;
+                    Ok(())
                 };
+                if let Some(s) = &expect.state {
+                    sep(f)?;
+                    write!(f, "state={s}")?;
+                }
                 if expect.require_healthy {
-                    write!(f, "{}healthy=true", if first { "?" } else { "&" })?;
+                    sep(f)?;
+                    write!(f, "healthy=true")?;
+                }
+                match &expect.log_match {
+                    Some(LogMatcher::Substring(s)) => {
+                        sep(f)?;
+                        write!(f, "log-match={}", encode_arg(s))?;
+                    }
+                    Some(LogMatcher::Regex(re)) => {
+                        sep(f)?;
+                        write!(f, "log-regex={}", encode_arg(re.as_str()))?;
+                    }
+                    None => {}
                 }
                 Ok(())
             }
@@ -1065,6 +1082,8 @@ fn parse_docker_target(input: &str, url: &Url) -> Result<Target> {
         ));
     }
     let mut expect = DockerExpect::default();
+    let mut log_needle: Option<String> = None;
+    let mut log_pattern: Option<String> = None;
     for (k, v) in url.query_pairs() {
         match k.as_ref() {
             "state" => {
@@ -1082,16 +1101,55 @@ fn parse_docker_target(input: &str, url: &Url) -> Result<Target> {
             "healthy" => {
                 expect.require_healthy = matches!(v.as_ref(), "1" | "true" | "yes");
             }
+            "log-match" => {
+                if log_needle.is_some() {
+                    return Err(parse_err(
+                        input,
+                        "docker:// `?log-match` may appear at most once",
+                    ));
+                }
+                if v.is_empty() {
+                    return Err(parse_err(input, "docker:// `?log-match` cannot be empty"));
+                }
+                log_needle = Some(v.into_owned());
+            }
+            "log-regex" => {
+                if log_pattern.is_some() {
+                    return Err(parse_err(
+                        input,
+                        "docker:// `?log-regex` may appear at most once",
+                    ));
+                }
+                if v.is_empty() {
+                    return Err(parse_err(input, "docker:// `?log-regex` cannot be empty"));
+                }
+                log_pattern = Some(v.into_owned());
+            }
             other => {
                 return Err(parse_err(
                     input,
                     &format!(
-                        "unknown docker:// query key `{other}` (only `state` or `healthy` supported)"
+                        "unknown docker:// query key `{other}` (only `state`, `healthy`, `log-match`, or `log-regex` supported)"
                     ),
                 ));
             }
         }
     }
+    expect.log_match = match (log_needle, log_pattern) {
+        (Some(_), Some(_)) => {
+            return Err(parse_err(
+                input,
+                "docker:// `?log-match` and `?log-regex` are mutually exclusive",
+            ));
+        }
+        (Some(s), None) => Some(LogMatcher::Substring(s)),
+        (None, Some(p)) => {
+            let re = regex_lite::Regex::new(&p)
+                .map_err(|e| parse_err(input, &format!("invalid docker:// log-regex: {e}")))?;
+            Some(LogMatcher::Regex(std::sync::Arc::new(re)))
+        }
+        (None, None) => None,
+    };
     Ok(Target::Docker { name, expect })
 }
 
@@ -1553,6 +1611,60 @@ mod tests {
     #[test]
     fn docker_rejects_unknown_query_key() {
         assert!("docker://api?foo=bar".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn docker_log_match_substring() {
+        let t: Target = "docker://api?log-match=Started".parse().unwrap();
+        match t {
+            Target::Docker { expect, .. } => match expect.log_match {
+                Some(LogMatcher::Substring(s)) => assert_eq!(s, "Started"),
+                _ => panic!("expected Substring matcher"),
+            },
+            _ => panic!("expected Docker variant"),
+        }
+    }
+
+    #[test]
+    fn docker_log_regex_compiles() {
+        let t: Target = "docker://api?log-regex=ready%5Cs%2Bv%5Cd".parse().unwrap();
+        match t {
+            Target::Docker { expect, .. } => match expect.log_match {
+                Some(LogMatcher::Regex(re)) => assert_eq!(re.as_str(), "ready\\s+v\\d"),
+                _ => panic!("expected Regex matcher"),
+            },
+            _ => panic!("expected Docker variant"),
+        }
+    }
+
+    #[test]
+    fn docker_log_match_and_log_regex_mutually_exclusive() {
+        assert!(
+            "docker://api?log-match=a&log-regex=b"
+                .parse::<Target>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn docker_log_match_empty_rejected() {
+        assert!("docker://api?log-match=".parse::<Target>().is_err());
+        assert!("docker://api?log-regex=".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn docker_log_bad_regex_rejected() {
+        assert!("docker://api?log-regex=%5B".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn docker_display_includes_log_match() {
+        let t: Target = "docker://api?log-match=hello".parse().unwrap();
+        assert_eq!(format!("{t}"), "docker://api?log-match=hello");
+        let t: Target = "docker://api?state=running&log-match=hello"
+            .parse()
+            .unwrap();
+        assert_eq!(format!("{t}"), "docker://api?state=running&log-match=hello");
     }
 
     #[test]

@@ -6,7 +6,7 @@ use tokio::time::timeout;
 use super::hint::hints;
 use super::{AttemptCtx, err_stage, ok_stage};
 use crate::diagnostic::{Stage, StageKind};
-use crate::target::DockerExpect;
+use crate::target::{DockerExpect, LogMatcher};
 use crate::util::sanitize_for_terminal;
 
 const HTTP_READ_CAP: usize = 64 * 1024;
@@ -29,6 +29,8 @@ enum ProbeError {
     NoHealthcheck(String),
     #[error("container `{name}` healthcheck is `{status}`")]
     NotHealthy { name: String, status: String },
+    #[error("container `{0}` logs do not yet match the expected pattern")]
+    LogMismatch(String),
 }
 
 impl ProbeError {
@@ -40,6 +42,7 @@ impl ProbeError {
             Self::WrongState { .. } => hints::DOCKER_NOT_RUNNING,
             Self::NoHealthcheck(_) => hints::DOCKER_NO_HEALTHCHECK,
             Self::NotHealthy { .. } => hints::DOCKER_UNHEALTHY,
+            Self::LogMismatch(_) => hints::DOCKER_LOG_NOT_FOUND,
         }
     }
 }
@@ -91,7 +94,60 @@ async fn run(name: &str, expect: &DockerExpect) -> Result<(), ProbeError> {
             });
         }
     }
+    if let Some(matcher) = &expect.log_match {
+        let raw = fetch_logs(name).await?;
+        let text = demux_logs(&raw);
+        let hit = match matcher {
+            LogMatcher::Substring(s) => text.contains(s.as_str()),
+            LogMatcher::Regex(re) => re.is_match(&text),
+        };
+        if !hit {
+            return Err(ProbeError::LogMismatch(name.to_owned()));
+        }
+    }
     Ok(())
+}
+
+const LOG_TAIL: usize = 200;
+
+async fn fetch_logs(name: &str) -> Result<Vec<u8>, ProbeError> {
+    let encoded = percent_encoding::utf8_percent_encode(name, PATH_SAFE).to_string();
+    let request = format!(
+        "GET /containers/{encoded}/logs?stdout=1&stderr=1&tail={tail} HTTP/1.1\r\nHost: docker\r\nAccept: */*\r\nConnection: close\r\nUser-Agent: holdon/{ver}\r\n\r\n",
+        tail = LOG_TAIL,
+        ver = env!("CARGO_PKG_VERSION"),
+    );
+    let raw = transport::round_trip(request.as_bytes()).await?;
+    let (status, body) = parse_response_bytes(&raw)?;
+    match status {
+        200 | 101 => Ok(body),
+        404 => Err(ProbeError::NotFound(name.to_owned())),
+        other => Err(ProbeError::Protocol(format!(
+            "unexpected HTTP {other} from /containers/{name}/logs"
+        ))),
+    }
+}
+
+pub(crate) fn demux_logs(raw: &[u8]) -> String {
+    let mut out = Vec::with_capacity(raw.len());
+    let mut i = 0;
+    while i < raw.len() {
+        if i + 8 > raw.len() {
+            out.extend_from_slice(&raw[i..]);
+            break;
+        }
+        let stream = raw[i];
+        if stream > 2 || raw[i + 1] != 0 || raw[i + 2] != 0 || raw[i + 3] != 0 {
+            out.extend_from_slice(&raw[i..]);
+            break;
+        }
+        let size = u32::from_be_bytes([raw[i + 4], raw[i + 5], raw[i + 6], raw[i + 7]]) as usize;
+        i += 8;
+        let end = i.saturating_add(size).min(raw.len());
+        out.extend_from_slice(&raw[i..end]);
+        i = end;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 async fn inspect(name: &str) -> Result<String, ProbeError> {
@@ -122,6 +178,73 @@ const PATH_SAFE: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
     .add(b'?')
     .add(b'/')
     .add(b'\\');
+
+fn parse_response_bytes(raw: &[u8]) -> Result<(u16, Vec<u8>), ProbeError> {
+    let split = find_header_terminator(raw)
+        .ok_or_else(|| ProbeError::Protocol("response missing CRLFCRLF separator".into()))?;
+    let head = std::str::from_utf8(&raw[..split])
+        .map_err(|_| ProbeError::Protocol("response headers were not valid UTF-8".into()))?;
+    let body = &raw[split + 4..];
+    let status_line = head
+        .lines()
+        .next()
+        .ok_or_else(|| ProbeError::Protocol("empty response".into()))?;
+    let status = status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse::<u16>().ok())
+        .ok_or_else(|| {
+            ProbeError::Protocol(format!("could not parse status line `{status_line}`"))
+        })?;
+    let chunked = head
+        .lines()
+        .skip(1)
+        .filter_map(|l| l.split_once(':'))
+        .any(|(k, v)| {
+            k.trim().eq_ignore_ascii_case("transfer-encoding")
+                && v.split(',')
+                    .any(|t| t.trim().eq_ignore_ascii_case("chunked"))
+        });
+    let body_bytes = if chunked {
+        decode_chunked_bytes(body)?
+    } else {
+        body.to_vec()
+    };
+    Ok((status, body_bytes))
+}
+
+fn decode_chunked_bytes(body: &[u8]) -> Result<Vec<u8>, ProbeError> {
+    let mut out = Vec::with_capacity(body.len());
+    let mut cursor = 0;
+    while cursor < body.len() {
+        let line_end = body[cursor..]
+            .windows(2)
+            .position(|w| w == b"\r\n")
+            .ok_or_else(|| ProbeError::Protocol("malformed chunked body".into()))?;
+        let size_hex = std::str::from_utf8(&body[cursor..cursor + line_end])
+            .map_err(|_| ProbeError::Protocol("chunk size not UTF-8".into()))?
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim();
+        let size = usize::from_str_radix(size_hex, 16)
+            .map_err(|_| ProbeError::Protocol(format!("invalid chunk size `{size_hex}`")))?;
+        cursor += line_end + 2;
+        if size == 0 {
+            break;
+        }
+        if cursor + size > body.len() {
+            return Err(ProbeError::Protocol("chunked body truncated".into()));
+        }
+        out.extend_from_slice(&body[cursor..cursor + size]);
+        cursor += size;
+        if cursor + 2 > body.len() || &body[cursor..cursor + 2] != b"\r\n" {
+            return Err(ProbeError::Protocol("chunk missing trailing CRLF".into()));
+        }
+        cursor += 2;
+    }
+    Ok(out)
+}
 
 fn parse_response(raw: &[u8]) -> Result<(u16, String), ProbeError> {
     let split = find_header_terminator(raw)
@@ -362,6 +485,32 @@ mod tests {
     fn rejects_missing_terminator() {
         let raw = b"HTTP/1.1 200 OK\r\nno terminator";
         assert!(parse_response(raw).is_err());
+    }
+
+    #[test]
+    fn demux_strips_multiplex_headers() {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&[1, 0, 0, 0, 0, 0, 0, 5]);
+        raw.extend_from_slice(b"hello");
+        raw.extend_from_slice(&[2, 0, 0, 0, 0, 0, 0, 6]);
+        raw.extend_from_slice(b" world");
+        let text = demux_logs(&raw);
+        assert_eq!(text, "hello world");
+    }
+
+    #[test]
+    fn demux_passes_tty_streams_through() {
+        let raw = b"plain text without frame headers";
+        let text = demux_logs(raw);
+        assert_eq!(text, "plain text without frame headers");
+    }
+
+    #[test]
+    fn demux_handles_truncated_frame() {
+        let mut raw = vec![1, 0, 0, 0, 0, 0, 0, 99];
+        raw.extend_from_slice(b"short");
+        let text = demux_logs(&raw);
+        assert_eq!(text, "short");
     }
 
     #[test]
