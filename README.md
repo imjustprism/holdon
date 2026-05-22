@@ -123,7 +123,7 @@ The argument after `--` is the command to run once every target is ready. holdon
 
 | Scheme                          | What it checks                            |
 | ------------------------------- | ----------------------------------------- |
-| `tcp://`, `:port`, `host:port`  | DNS resolve, TCP connect                  |
+| `tcp://`, `:port`, `host:port`  | DNS resolve, TCP connect. Optional `?expect-banner=NEEDLE` or `?expect-banner-regex=PATTERN` reads the first 4 KiB after connect and matches against it (SMTP `220`, `SSH-2.0`, etc.) |
 | `http://`, `https://`           | TCP, TLS, HTTP request (`-H`, `--method`, `--data`, `--expect-body`, `--expect-body-regex`, `--expect-json`, `--expect-header`, `--no-follow-redirects`, `--ca-cert`, `--client-cert` + `--client-key`, `--tls-min`) |
 | `dns://`                        | Hostname resolves                         |
 | `file:///path`                  | Path exists (`?mode=absent` inverse)      |
