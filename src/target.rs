@@ -124,6 +124,7 @@ pub enum Target {
         kind: K8sKind,
         namespace: String,
         name: String,
+        conditions: Vec<String>,
     },
     Ws {
         url: Url,
@@ -329,11 +330,13 @@ impl fmt::Debug for Target {
                 kind,
                 namespace,
                 name,
+                conditions,
             } => f
                 .debug_struct("K8s")
                 .field("kind", &kind.as_str())
                 .field("namespace", namespace)
                 .field("name", name)
+                .field("conditions", conditions)
                 .finish(),
             Self::Ws { url, expect } => f
                 .debug_struct("Ws")
@@ -410,7 +413,14 @@ impl fmt::Display for Target {
                 kind,
                 namespace,
                 name,
-            } => write!(f, "k8s://{}/{namespace}/{name}", kind.as_str()),
+                conditions,
+            } => {
+                write!(f, "k8s://{}/{namespace}/{name}", kind.as_str())?;
+                if !conditions.is_empty() {
+                    write!(f, "?condition={}", conditions.join(","))?;
+                }
+                Ok(())
+            }
             Self::Exec { program, args } => {
                 write!(f, "exec://{}", program.display())?;
                 for (i, a) in args.iter().enumerate() {
@@ -1188,14 +1198,59 @@ fn parse_k8s_target(input: &str, url: &Url) -> Result<Target> {
             "k8s:// resource name must match RFC 1123 (lowercase, digits, dashes, dots)",
         ));
     }
-    if url.query().is_some() {
-        return Err(parse_err(input, "k8s:// does not accept query parameters"));
+    let mut conditions: Vec<String> = Vec::new();
+    for (k, v) in url.query_pairs() {
+        match k.as_ref() {
+            "condition" => {
+                if !conditions.is_empty() {
+                    return Err(parse_err(
+                        input,
+                        "k8s:// `?condition` may appear at most once",
+                    ));
+                }
+                if v.is_empty() {
+                    return Err(parse_err(input, "k8s:// `?condition` cannot be empty"));
+                }
+                for part in v.split(',') {
+                    let trimmed = part.trim();
+                    if trimmed.is_empty() {
+                        return Err(parse_err(input, "k8s:// `?condition` has an empty entry"));
+                    }
+                    if !is_valid_condition_type(trimmed) {
+                        return Err(parse_err(
+                            input,
+                            &format!(
+                                "k8s:// condition `{trimmed}` must be ASCII alphanumeric (PascalCase)"
+                            ),
+                        ));
+                    }
+                    if conditions.iter().any(|c| c.eq_ignore_ascii_case(trimmed)) {
+                        return Err(parse_err(
+                            input,
+                            &format!("k8s:// duplicate condition `{trimmed}`"),
+                        ));
+                    }
+                    conditions.push(trimmed.to_owned());
+                }
+            }
+            other => {
+                return Err(parse_err(
+                    input,
+                    &format!("unknown k8s:// query key `{other}` (only `condition` supported)"),
+                ));
+            }
+        }
     }
     Ok(Target::K8s {
         kind,
         namespace: (*namespace).to_owned(),
         name: (*name).to_owned(),
+        conditions,
     })
+}
+
+fn is_valid_condition_type(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 fn is_valid_k8s_name(s: &str) -> bool {
@@ -1440,13 +1495,104 @@ mod tests {
                 kind,
                 namespace,
                 name,
+                conditions,
             } => {
                 assert_eq!(kind, K8sKind::Pod);
                 assert_eq!(namespace, "default");
                 assert_eq!(name, "api");
+                assert!(conditions.is_empty());
             }
             _ => panic!("expected K8s variant"),
         }
+    }
+
+    #[test]
+    fn k8s_condition_single() {
+        let t: Target = "k8s://pod/default/api?condition=Ready".parse().unwrap();
+        match t {
+            Target::K8s { conditions, .. } => assert_eq!(conditions, vec!["Ready".to_owned()]),
+            _ => panic!("expected K8s variant"),
+        }
+    }
+
+    #[test]
+    fn k8s_condition_multi() {
+        let t: Target = "k8s://pod/default/api?condition=Ready,Initialized,ContainersReady"
+            .parse()
+            .unwrap();
+        match t {
+            Target::K8s { conditions, .. } => assert_eq!(
+                conditions,
+                vec![
+                    "Ready".to_owned(),
+                    "Initialized".to_owned(),
+                    "ContainersReady".to_owned(),
+                ]
+            ),
+            _ => panic!("expected K8s variant"),
+        }
+    }
+
+    #[test]
+    fn k8s_condition_empty_rejected() {
+        assert!(
+            "k8s://pod/default/api?condition="
+                .parse::<Target>()
+                .is_err()
+        );
+        assert!(
+            "k8s://pod/default/api?condition=Ready,"
+                .parse::<Target>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn k8s_condition_invalid_char_rejected() {
+        assert!(
+            "k8s://pod/default/api?condition=Ready!"
+                .parse::<Target>()
+                .is_err()
+        );
+        assert!(
+            "k8s://pod/default/api?condition=has-dash"
+                .parse::<Target>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn k8s_condition_duplicate_value_rejected() {
+        assert!(
+            "k8s://pod/default/api?condition=Ready,Ready"
+                .parse::<Target>()
+                .is_err()
+        );
+        assert!(
+            "k8s://pod/default/api?condition=Ready,ready"
+                .parse::<Target>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn k8s_condition_duplicate_key_rejected() {
+        assert!(
+            "k8s://pod/default/api?condition=Ready&condition=Initialized"
+                .parse::<Target>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn k8s_condition_display_roundtrip() {
+        let t: Target = "k8s://pod/default/api?condition=Ready,Initialized"
+            .parse()
+            .unwrap();
+        assert_eq!(
+            format!("{t}"),
+            "k8s://pod/default/api?condition=Ready,Initialized"
+        );
     }
 
     #[test]
@@ -1479,7 +1625,7 @@ mod tests {
     }
 
     #[test]
-    fn k8s_rejects_query() {
+    fn k8s_rejects_unknown_query() {
         assert!("k8s://pod/default/api?foo=bar".parse::<Target>().is_err());
     }
 

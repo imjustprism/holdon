@@ -128,7 +128,8 @@ impl Target {
                 kind,
                 namespace,
                 name,
-            } => k8s::probe(*kind, namespace, name, ctx).await,
+                conditions,
+            } => k8s::probe(*kind, namespace, name, conditions, ctx).await,
             #[cfg(not(feature = "k8s"))]
             Self::K8s { .. } => disabled_stage(StageKind::K8s, "k8s"),
             #[cfg(feature = "websocket")]
