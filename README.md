@@ -140,6 +140,7 @@ The argument after `--` is the command to run once every target is ready. holdon
 | `exec://program?arg=...`        | External command, ready iff exit `0`      |
 | `process://<pid>`, `process://<name>` | Process exists by PID or by executable name (Windows strips `.exe`) |
 | `ws://`, `wss://`               | WebSocket handshake. Optional `?expect-text=NEEDLE` or `?expect-regex=PATTERN` waits for the first frame and matches against it |
+| `docker://name`                 | Docker container `?state=running\|paused\|exited\|...`, `?healthy=true`, plus `?log-match=NEEDLE` or `?log-regex=PATTERN` against the last 200 log lines |
 
 ## Feature flags
 

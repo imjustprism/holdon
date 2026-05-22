@@ -6,10 +6,11 @@ use tokio::time::timeout;
 use super::hint::hints;
 use super::{AttemptCtx, err_stage, ok_stage};
 use crate::diagnostic::{Stage, StageKind};
-use crate::target::DockerExpect;
+use crate::target::{DockerExpect, LogMatcher};
 use crate::util::sanitize_for_terminal;
 
-const HTTP_READ_CAP: usize = 64 * 1024;
+const INSPECT_READ_CAP: usize = 64 * 1024;
+const LOG_READ_CAP: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 enum ProbeError {
@@ -29,17 +30,25 @@ enum ProbeError {
     NoHealthcheck(String),
     #[error("container `{name}` healthcheck is `{status}`")]
     NotHealthy { name: String, status: String },
+    #[error("container `{0}` logs do not yet match the expected pattern")]
+    LogMismatch(String),
+    #[error("container `{0}` log tail exceeded the 2 MiB read cap")]
+    LogTooLarge(String),
+    #[error("Docker engine response exceeded the read cap")]
+    CapExceeded,
 }
 
 impl ProbeError {
     const fn hint(&self) -> &'static str {
         match self {
             Self::Connect(_) => hints::DOCKER_NO_SOCKET,
-            Self::Protocol(_) => hints::DOCKER_PROTOCOL,
+            Self::Protocol(_) | Self::CapExceeded => hints::DOCKER_PROTOCOL,
             Self::NotFound(_) => hints::DOCKER_NO_SUCH,
             Self::WrongState { .. } => hints::DOCKER_NOT_RUNNING,
             Self::NoHealthcheck(_) => hints::DOCKER_NO_HEALTHCHECK,
             Self::NotHealthy { .. } => hints::DOCKER_UNHEALTHY,
+            Self::LogMismatch(_) => hints::DOCKER_LOG_NOT_FOUND,
+            Self::LogTooLarge(_) => hints::DOCKER_LOG_TOO_LARGE,
         }
     }
 }
@@ -91,7 +100,65 @@ async fn run(name: &str, expect: &DockerExpect) -> Result<(), ProbeError> {
             });
         }
     }
+    if let Some(matcher) = &expect.log_match {
+        let raw = fetch_logs(name).await?;
+        let text = demux_logs(&raw);
+        let hit = match matcher {
+            LogMatcher::Substring(s) => text.contains(s.as_str()),
+            LogMatcher::Regex(re) => re.is_match(&text),
+        };
+        if !hit {
+            return Err(ProbeError::LogMismatch(name.to_owned()));
+        }
+    }
     Ok(())
+}
+
+const LOG_TAIL: usize = 200;
+
+async fn fetch_logs(name: &str) -> Result<Vec<u8>, ProbeError> {
+    let encoded = percent_encoding::utf8_percent_encode(name, PATH_SAFE).to_string();
+    let request = format!(
+        "GET /containers/{encoded}/logs?stdout=1&stderr=1&tail={tail} HTTP/1.1\r\nHost: docker\r\nAccept: */*\r\nConnection: close\r\nUser-Agent: holdon/{ver}\r\n\r\n",
+        tail = LOG_TAIL,
+        ver = env!("CARGO_PKG_VERSION"),
+    );
+    let raw = transport::round_trip(request.as_bytes(), LOG_READ_CAP)
+        .await
+        .map_err(|e| match e {
+            ProbeError::CapExceeded => ProbeError::LogTooLarge(name.to_owned()),
+            other => other,
+        })?;
+    let (status, body) = parse_response_bytes(&raw)?;
+    match status {
+        200 => Ok(body),
+        404 => Err(ProbeError::NotFound(name.to_owned())),
+        other => Err(ProbeError::Protocol(format!(
+            "unexpected HTTP {other} from /containers/{name}/logs"
+        ))),
+    }
+}
+
+pub(crate) fn demux_logs(raw: &[u8]) -> String {
+    let mut out = Vec::with_capacity(raw.len());
+    let mut i = 0;
+    while i < raw.len() {
+        if i + 8 > raw.len() {
+            out.extend_from_slice(&raw[i..]);
+            break;
+        }
+        let stream = raw[i];
+        if stream > 2 || raw[i + 1] != 0 || raw[i + 2] != 0 || raw[i + 3] != 0 {
+            out.extend_from_slice(&raw[i..]);
+            break;
+        }
+        let size = u32::from_be_bytes([raw[i + 4], raw[i + 5], raw[i + 6], raw[i + 7]]) as usize;
+        i += 8;
+        let end = i.saturating_add(size).min(raw.len());
+        out.extend_from_slice(&raw[i..end]);
+        i = end;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 async fn inspect(name: &str) -> Result<String, ProbeError> {
@@ -100,7 +167,7 @@ async fn inspect(name: &str) -> Result<String, ProbeError> {
         "GET /containers/{encoded}/json HTTP/1.1\r\nHost: docker\r\nAccept: application/json\r\nConnection: close\r\nUser-Agent: holdon/{ver}\r\n\r\n",
         ver = env!("CARGO_PKG_VERSION"),
     );
-    let raw = transport::round_trip(request.as_bytes()).await?;
+    let raw = transport::round_trip(request.as_bytes(), INSPECT_READ_CAP).await?;
     let (status, body) = parse_response(&raw)?;
     match status {
         200 => Ok(body),
@@ -123,7 +190,7 @@ const PATH_SAFE: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
     .add(b'/')
     .add(b'\\');
 
-fn parse_response(raw: &[u8]) -> Result<(u16, String), ProbeError> {
+fn parse_response_bytes(raw: &[u8]) -> Result<(u16, Vec<u8>), ProbeError> {
     let split = find_header_terminator(raw)
         .ok_or_else(|| ProbeError::Protocol("response missing CRLFCRLF separator".into()))?;
     let head = std::str::from_utf8(&raw[..split])
@@ -149,19 +216,15 @@ fn parse_response(raw: &[u8]) -> Result<(u16, String), ProbeError> {
                 && v.split(',')
                     .any(|t| t.trim().eq_ignore_ascii_case("chunked"))
         });
-    let body_str = if chunked {
-        decode_chunked(body)?
+    let body_bytes = if chunked {
+        decode_chunked_bytes(body)?
     } else {
-        String::from_utf8_lossy(body).into_owned()
+        body.to_vec()
     };
-    Ok((status, body_str))
+    Ok((status, body_bytes))
 }
 
-fn find_header_terminator(buf: &[u8]) -> Option<usize> {
-    buf.windows(4).position(|w| w == b"\r\n\r\n")
-}
-
-fn decode_chunked(body: &[u8]) -> Result<String, ProbeError> {
+fn decode_chunked_bytes(body: &[u8]) -> Result<Vec<u8>, ProbeError> {
     let mut out = Vec::with_capacity(body.len());
     let mut cursor = 0;
     while cursor < body.len() {
@@ -191,7 +254,16 @@ fn decode_chunked(body: &[u8]) -> Result<String, ProbeError> {
         }
         cursor += 2;
     }
-    String::from_utf8(out).map_err(|_| ProbeError::Protocol("chunked body not UTF-8".into()))
+    Ok(out)
+}
+
+fn parse_response(raw: &[u8]) -> Result<(u16, String), ProbeError> {
+    let (status, body) = parse_response_bytes(raw)?;
+    Ok((status, String::from_utf8_lossy(&body).into_owned()))
+}
+
+fn find_header_terminator(buf: &[u8]) -> Option<usize> {
+    buf.windows(4).position(|w| w == b"\r\n\r\n")
 }
 
 fn extract_engine_message(body: &str) -> String {
@@ -229,7 +301,7 @@ mod transport {
     use tokio::io::AsyncWriteExt;
     use tokio::net::UnixStream;
 
-    pub(super) async fn round_trip(request: &[u8]) -> Result<Vec<u8>, ProbeError> {
+    pub(super) async fn round_trip(request: &[u8], cap: usize) -> Result<Vec<u8>, ProbeError> {
         let path = socket_path()?;
         let mut stream = UnixStream::connect(&path).await.map_err(|e| {
             ProbeError::Connect(format!(
@@ -246,7 +318,7 @@ mod transport {
             .shutdown()
             .await
             .map_err(|e| ProbeError::Connect(format!("shutdown: {}", super::io_kind(&e))))?;
-        super::read_capped(&mut stream).await
+        super::read_capped(&mut stream, cap).await
     }
 
     fn socket_path() -> Result<PathBuf, ProbeError> {
@@ -271,7 +343,7 @@ mod transport {
     use tokio::io::AsyncWriteExt;
     use tokio::net::windows::named_pipe::ClientOptions;
 
-    pub(super) async fn round_trip(request: &[u8]) -> Result<Vec<u8>, ProbeError> {
+    pub(super) async fn round_trip(request: &[u8], cap: usize) -> Result<Vec<u8>, ProbeError> {
         let path = pipe_path()?;
         let mut stream = ClientOptions::new()
             .open(&path)
@@ -280,7 +352,7 @@ mod transport {
             .write_all(request)
             .await
             .map_err(|e| ProbeError::Connect(format!("writing request: {}", super::io_kind(&e))))?;
-        super::read_capped(&mut stream).await
+        super::read_capped(&mut stream, cap).await
     }
 
     fn pipe_path() -> Result<String, ProbeError> {
@@ -299,24 +371,25 @@ mod transport {
     }
 }
 
-async fn read_capped<R: AsyncReadExt + Unpin>(reader: &mut R) -> Result<Vec<u8>, ProbeError> {
+async fn read_capped<R: AsyncReadExt + Unpin>(
+    reader: &mut R,
+    cap: usize,
+) -> Result<Vec<u8>, ProbeError> {
     let mut buf = Vec::with_capacity(4096);
     let mut chunk = [0u8; 4096];
     loop {
-        if buf.len() == HTTP_READ_CAP {
+        if buf.len() == cap {
             let mut overflow = [0u8; 1];
             return match reader.read(&mut overflow).await {
                 Ok(0) => Ok(buf),
-                Ok(_) => Err(ProbeError::Protocol(format!(
-                    "Docker engine response exceeded {HTTP_READ_CAP} bytes"
-                ))),
+                Ok(_) => Err(ProbeError::CapExceeded),
                 Err(e) => Err(ProbeError::Connect(format!(
                     "reading response: {}",
                     io_kind(&e)
                 ))),
             };
         }
-        let remaining = HTTP_READ_CAP - buf.len();
+        let remaining = cap - buf.len();
         let take_max = remaining.min(chunk.len());
         match reader.read(&mut chunk[..take_max]).await {
             Ok(0) => break,
@@ -362,6 +435,32 @@ mod tests {
     fn rejects_missing_terminator() {
         let raw = b"HTTP/1.1 200 OK\r\nno terminator";
         assert!(parse_response(raw).is_err());
+    }
+
+    #[test]
+    fn demux_strips_multiplex_headers() {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&[1, 0, 0, 0, 0, 0, 0, 5]);
+        raw.extend_from_slice(b"hello");
+        raw.extend_from_slice(&[2, 0, 0, 0, 0, 0, 0, 6]);
+        raw.extend_from_slice(b" world");
+        let text = demux_logs(&raw);
+        assert_eq!(text, "hello world");
+    }
+
+    #[test]
+    fn demux_passes_tty_streams_through() {
+        let raw = b"plain text without frame headers";
+        let text = demux_logs(raw);
+        assert_eq!(text, "plain text without frame headers");
+    }
+
+    #[test]
+    fn demux_handles_truncated_frame() {
+        let mut raw = vec![1, 0, 0, 0, 0, 0, 0, 99];
+        raw.extend_from_slice(b"short");
+        let text = demux_logs(&raw);
+        assert_eq!(text, "short");
     }
 
     #[test]

@@ -115,6 +115,8 @@ pub(crate) mod hints {
     pub(crate) const DOCKER_NO_HEALTHCHECK: &str = "container has no HEALTHCHECK defined, drop ?healthy=true or add a HEALTHCHECK to the image";
     pub(crate) const DOCKER_UNHEALTHY: &str = "container reported unhealthy, inspect the most recent healthcheck logs with `docker inspect`";
     pub(crate) const DOCKER_PROTOCOL: &str = "unexpected response from the Docker engine API, ensure DOCKER_HOST points at a real Docker engine";
+    pub(crate) const DOCKER_LOG_NOT_FOUND: &str = "container exists but its captured logs do not yet contain the expected text, app may still be starting";
+    pub(crate) const DOCKER_LOG_TOO_LARGE: &str = "container's log tail exceeded the 2 MiB read cap, narrow the match string so it appears earlier or use a smaller tail";
     pub(crate) const K8S_NO_CONFIG: &str = "could not resolve a Kubernetes API server, run inside a pod with a service account or set KUBE_SERVER and KUBE_TOKEN";
     pub(crate) const K8S_API_UNREACHABLE: &str =
         "could not reach the Kubernetes API server, check connectivity and TLS";
