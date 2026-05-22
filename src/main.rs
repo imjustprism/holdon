@@ -400,6 +400,10 @@ async fn run(args: Args) -> Result<ExitStatus> {
             watch_attempt_timeouts,
             args.watch_interval,
             watch_reverse,
+            #[cfg(feature = "http")]
+            args.on_transition.clone(),
+            #[cfg(feature = "http")]
+            args.webhook_timeout,
             &interrupted,
         )
         .await;
@@ -630,6 +634,11 @@ async fn fire_webhook(url: &str, ready: bool, report: &holdon::Report, timeout: 
             "attempts": r.attempts,
         })).collect::<Vec<_>>(),
     });
+    send_json(url, &body.to_string(), timeout).await;
+}
+
+#[cfg(feature = "http")]
+async fn send_json(url: &str, body: &str, timeout: Duration) {
     let client = match reqwest::Client::builder()
         .user_agent(concat!("holdon/", env!("CARGO_PKG_VERSION")))
         .timeout(timeout)
@@ -644,7 +653,7 @@ async fn fire_webhook(url: &str, ready: bool, report: &holdon::Report, timeout: 
     let request = client
         .post(url)
         .header("content-type", "application/json")
-        .body(body.to_string());
+        .body(body.to_owned());
     match request.send().await {
         Ok(resp) => {
             let status = resp.status();
@@ -658,12 +667,38 @@ async fn fire_webhook(url: &str, ready: bool, report: &holdon::Report, timeout: 
     }
 }
 
+#[cfg(feature = "http")]
+async fn fire_transition_webhook(
+    url: &str,
+    idx: usize,
+    target: &Target,
+    ready: bool,
+    timeout: Duration,
+) {
+    use serde_json::json;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let body = json!({
+        "event": "transition",
+        "idx": idx,
+        "target": target.to_string(),
+        "transition": if ready { "fail->ready" } else { "ready->fail" },
+        "ready": ready,
+        "at": now,
+    });
+    send_json(url, &body.to_string(), timeout).await;
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn watch_loop(
     targets: Vec<Target>,
     initial_ready: Vec<bool>,
     attempt_timeouts: Vec<Duration>,
     interval: Duration,
     reverse_per_target: Vec<bool>,
+    #[cfg(feature = "http")] on_transition: Option<String>,
+    #[cfg(feature = "http")] webhook_timeout: Duration,
     interrupted: &Arc<AtomicU8>,
 ) {
     use std::io::Write as _;
@@ -731,6 +766,17 @@ async fn watch_loop(
                                             "holdon: [{idx}] {target}: {arrow}"
                                         );
                                         *prev = ready;
+                                        #[cfg(feature = "http")]
+                                        if let Some(hook) = on_transition.as_deref() {
+                                            fire_transition_webhook(
+                                                hook,
+                                                idx,
+                                                &target,
+                                                ready,
+                                                webhook_timeout,
+                                            )
+                                            .await;
+                                        }
                                     }
                                 }
                             }
