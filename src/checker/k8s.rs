@@ -48,10 +48,11 @@ pub(super) async fn probe(
     kind: K8sKind,
     namespace: &str,
     name: &str,
+    conditions: &[String],
     ctx: AttemptCtx,
 ) -> Vec<Stage> {
     let start = Instant::now();
-    let stage = match timeout(ctx.attempt_timeout, run(kind, namespace, name)).await {
+    let stage = match timeout(ctx.attempt_timeout, run(kind, namespace, name, conditions)).await {
         Ok(Ok(())) => ok_stage(StageKind::K8s, start.elapsed()),
         Ok(Err(e)) => {
             let h = e.hint();
@@ -72,7 +73,12 @@ pub(super) async fn probe(
     vec![stage]
 }
 
-async fn run(kind: K8sKind, namespace: &str, name: &str) -> Result<(), ProbeError> {
+async fn run(
+    kind: K8sKind,
+    namespace: &str,
+    name: &str,
+    conditions: &[String],
+) -> Result<(), ProbeError> {
     let cfg = load_config()?;
     let url = format!(
         "{}{}",
@@ -102,7 +108,51 @@ async fn run(kind: K8sKind, namespace: &str, name: &str) -> Result<(), ProbeErro
         .map_err(|e| ProbeError::Connect(format!("reading response body: {e}")))?;
     let value: serde_json::Value = serde_json::from_str(&body)
         .map_err(|e| ProbeError::Protocol(format!("API response was not JSON: {e}")))?;
-    check_ready(kind, &value)
+    if conditions.is_empty() {
+        check_ready(kind, &value)
+    } else {
+        check_explicit_conditions(kind, &value, conditions)
+    }
+}
+
+fn check_explicit_conditions(
+    kind: K8sKind,
+    v: &serde_json::Value,
+    conditions: &[String],
+) -> Result<(), ProbeError> {
+    if matches!(kind, K8sKind::Job) {
+        let arr = v.pointer("/status/conditions").and_then(|c| c.as_array());
+        if let Some(arr) = arr {
+            for cond in arr {
+                let Some(ct) = cond.get("type").and_then(|t| t.as_str()) else {
+                    continue;
+                };
+                if !ct.eq_ignore_ascii_case("Failed") {
+                    continue;
+                }
+                let status = cond
+                    .get("status")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("Unknown");
+                if status.eq_ignore_ascii_case("True") {
+                    let reason = cond
+                        .get("reason")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("no reason given");
+                    return Err(ProbeError::JobFailed(reason.to_owned()));
+                }
+            }
+        }
+    }
+    let label = match kind {
+        K8sKind::Pod => "pod",
+        K8sKind::Deployment => "deployment",
+        K8sKind::Job => "job",
+    };
+    for want in conditions {
+        check_condition(v, want, label)?;
+    }
+    Ok(())
 }
 
 fn resource_path(kind: K8sKind, namespace: &str, name: &str) -> String {
