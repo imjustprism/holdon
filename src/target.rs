@@ -1224,6 +1224,12 @@ fn parse_k8s_target(input: &str, url: &Url) -> Result<Target> {
                             ),
                         ));
                     }
+                    if conditions.iter().any(|c| c.eq_ignore_ascii_case(trimmed)) {
+                        return Err(parse_err(
+                            input,
+                            &format!("k8s:// duplicate condition `{trimmed}`"),
+                        ));
+                    }
                     conditions.push(trimmed.to_owned());
                 }
             }
@@ -1550,6 +1556,20 @@ mod tests {
         );
         assert!(
             "k8s://pod/default/api?condition=has-dash"
+                .parse::<Target>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn k8s_condition_duplicate_value_rejected() {
+        assert!(
+            "k8s://pod/default/api?condition=Ready,Ready"
+                .parse::<Target>()
+                .is_err()
+        );
+        assert!(
+            "k8s://pod/default/api?condition=Ready,ready"
                 .parse::<Target>()
                 .is_err()
         );

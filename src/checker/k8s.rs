@@ -120,29 +120,33 @@ fn check_explicit_conditions(
     v: &serde_json::Value,
     conditions: &[String],
 ) -> Result<(), ProbeError> {
-    if matches!(kind, K8sKind::Job) {
-        let arr = v.pointer("/status/conditions").and_then(|c| c.as_array());
-        if let Some(arr) = arr {
-            for cond in arr {
-                let Some(ct) = cond.get("type").and_then(|t| t.as_str()) else {
-                    continue;
-                };
-                if !ct.eq_ignore_ascii_case("Failed") {
-                    continue;
-                }
-                let status = cond
-                    .get("status")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("Unknown");
-                if status.eq_ignore_ascii_case("True") {
-                    let reason = cond
-                        .get("reason")
+    match kind {
+        K8sKind::Job => {
+            let arr = v.pointer("/status/conditions").and_then(|c| c.as_array());
+            if let Some(arr) = arr {
+                for cond in arr {
+                    let Some(ct) = cond.get("type").and_then(|t| t.as_str()) else {
+                        continue;
+                    };
+                    if !ct.eq_ignore_ascii_case("Failed") {
+                        continue;
+                    }
+                    let status = cond
+                        .get("status")
                         .and_then(|s| s.as_str())
-                        .unwrap_or("no reason given");
-                    return Err(ProbeError::JobFailed(reason.to_owned()));
+                        .unwrap_or("Unknown");
+                    if status.eq_ignore_ascii_case("True") {
+                        let reason = cond
+                            .get("reason")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("no reason given");
+                        return Err(ProbeError::JobFailed(reason.to_owned()));
+                    }
                 }
             }
         }
+        K8sKind::Deployment => check_observed_generation(v)?,
+        K8sKind::Pod => {}
     }
     let label = match kind {
         K8sKind::Pod => "pod",
@@ -151,6 +155,23 @@ fn check_explicit_conditions(
     };
     for want in conditions {
         check_condition(v, want, label)?;
+    }
+    Ok(())
+}
+
+fn check_observed_generation(v: &serde_json::Value) -> Result<(), ProbeError> {
+    let generation = v
+        .pointer("/metadata/generation")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0);
+    let observed = v
+        .pointer("/status/observedGeneration")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(-1);
+    if observed < generation {
+        return Err(ProbeError::NotReady(format!(
+            "deployment observedGeneration {observed} behind generation {generation}"
+        )));
     }
     Ok(())
 }
@@ -240,19 +261,7 @@ fn check_condition(v: &serde_json::Value, want: &str, label: &str) -> Result<(),
 }
 
 fn check_deployment(v: &serde_json::Value) -> Result<(), ProbeError> {
-    let generation = v
-        .pointer("/metadata/generation")
-        .and_then(serde_json::Value::as_i64)
-        .unwrap_or(0);
-    let observed = v
-        .pointer("/status/observedGeneration")
-        .and_then(serde_json::Value::as_i64)
-        .unwrap_or(-1);
-    if observed < generation {
-        return Err(ProbeError::NotReady(format!(
-            "deployment observedGeneration {observed} behind generation {generation}"
-        )));
-    }
+    check_observed_generation(v)?;
     check_condition(v, "Available", "deployment")
 }
 
