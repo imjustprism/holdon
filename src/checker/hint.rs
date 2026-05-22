@@ -8,6 +8,8 @@ pub(crate) mod hints {
     pub(crate) const SERVER_SLOW: &str = "server slow or unreachable";
     pub(crate) const NOT_LISTENING: &str = "service not listening on this port yet";
     pub(crate) const PORT_CLOSED: &str = "port closed or firewalled";
+    pub(crate) const TCP_NO_BANNER: &str = "TCP connected but the server did not send any data before the attempt timeout, lower the timeout or drop ?expect-banner";
+    pub(crate) const TCP_BANNER_MISMATCH: &str = "TCP banner did not contain the expected text, check the protocol greeting (SMTP 220, SSH-2.0, etc.) and the matcher";
     pub(crate) const NET_UNREACHABLE: &str = "network or route problem, not a port-closed issue";
     pub(crate) const PG_NOT_READY: &str = "server not accepting queries yet";
     pub(crate) const PG_TLS: &str =

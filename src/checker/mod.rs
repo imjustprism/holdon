@@ -62,7 +62,9 @@ impl Target {
     pub async fn probe(&self, ctx: AttemptCtx) -> CheckOutcome {
         let start = Instant::now();
         let stages = match self {
-            Self::Tcp { host, port } => tcp::probe(host.as_str(), *port, ctx).await,
+            Self::Tcp { host, port, expect } => {
+                tcp::probe(host.as_str(), *port, expect.as_ref(), ctx).await
+            }
             Self::Dns { host } => dns::probe(host.as_str(), ctx).await,
             Self::File { path, mode } => file::probe(path, *mode, ctx).await,
             #[cfg(feature = "http")]

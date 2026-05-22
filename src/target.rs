@@ -53,9 +53,11 @@ impl AsRef<str> for Hostname {
 #[derive(Clone)]
 #[non_exhaustive]
 pub enum Target {
+    #[non_exhaustive]
     Tcp {
         host: Hostname,
         port: u16,
+        expect: Option<LogMatcher>,
     },
     Http {
         url: Url,
@@ -243,10 +245,11 @@ impl fmt::Debug for Target {
     #[allow(clippy::too_many_lines)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Tcp { host, port } => f
+            Self::Tcp { host, port, expect } => f
                 .debug_struct("Tcp")
                 .field("host", &host.as_str())
                 .field("port", port)
+                .field("expect", expect)
                 .finish(),
             Self::Http { url, expect } => f
                 .debug_struct("Http")
@@ -352,9 +355,21 @@ impl fmt::Debug for Target {
 }
 
 impl fmt::Display for Target {
+    #[allow(clippy::too_many_lines)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Tcp { host, port } => write!(f, "tcp://{host}:{port}"),
+            Self::Tcp { host, port, expect } => {
+                write!(f, "tcp://{host}:{port}")?;
+                match expect {
+                    None => Ok(()),
+                    Some(LogMatcher::Substring(s)) => {
+                        write!(f, "?expect-banner={}", encode_arg(s))
+                    }
+                    Some(LogMatcher::Regex(re)) => {
+                        write!(f, "?expect-banner-regex={}", encode_arg(re.as_str()))
+                    }
+                }
+            }
             Self::Http { url, .. } => write!(f, "{url}"),
             Self::Dns { host } => write!(f, "dns://{host}"),
             Self::File { path, mode } => match mode {
@@ -500,6 +515,63 @@ fn validate_sql_identifier(input: &str, name: &str, scheme: &str) -> Result<(), 
         }
     }
     Ok(())
+}
+
+fn extract_tcp_expect(input: &str, url: &Url) -> Result<Option<LogMatcher>> {
+    let mut needle: Option<String> = None;
+    let mut pattern: Option<String> = None;
+    for (k, v) in url.query_pairs() {
+        match k.as_ref() {
+            "expect-banner" => {
+                if needle.is_some() {
+                    return Err(parse_err(
+                        input,
+                        "tcp:// `?expect-banner` may appear at most once",
+                    ));
+                }
+                if v.is_empty() {
+                    return Err(parse_err(input, "tcp:// `?expect-banner` cannot be empty"));
+                }
+                needle = Some(v.into_owned());
+            }
+            "expect-banner-regex" => {
+                if pattern.is_some() {
+                    return Err(parse_err(
+                        input,
+                        "tcp:// `?expect-banner-regex` may appear at most once",
+                    ));
+                }
+                if v.is_empty() {
+                    return Err(parse_err(
+                        input,
+                        "tcp:// `?expect-banner-regex` cannot be empty",
+                    ));
+                }
+                pattern = Some(v.into_owned());
+            }
+            other => {
+                return Err(parse_err(
+                    input,
+                    &format!(
+                        "unknown tcp:// query key `{other}` (only `expect-banner` or `expect-banner-regex` supported)"
+                    ),
+                ));
+            }
+        }
+    }
+    match (needle, pattern) {
+        (Some(_), Some(_)) => Err(parse_err(
+            input,
+            "tcp:// `?expect-banner` and `?expect-banner-regex` are mutually exclusive",
+        )),
+        (Some(s), None) => Ok(Some(LogMatcher::Substring(s))),
+        (None, Some(p)) => {
+            let re = regex_lite::Regex::new(&p)
+                .map_err(|e| parse_err(input, &format!("invalid tcp:// banner regex: {e}")))?;
+            Ok(Some(LogMatcher::Regex(std::sync::Arc::new(re))))
+        }
+        (None, None) => Ok(None),
+    }
 }
 
 fn extract_ws_expect(input: &str, url: &Url) -> Result<Option<LogMatcher>> {
@@ -735,6 +807,7 @@ impl FromStr for Target {
                 return Ok(Self::Tcp {
                     host: Hostname::new("localhost")?,
                     port,
+                    expect: None,
                 });
             }
         }
@@ -752,6 +825,7 @@ impl FromStr for Target {
                 return Ok(Self::Tcp {
                     host: Hostname::new(host)?,
                     port,
+                    expect: None,
                 });
             }
             if let Some(rest) = input.strip_prefix("tcp:") {
@@ -763,6 +837,7 @@ impl FromStr for Target {
                     return Ok(Self::Tcp {
                         host: Hostname::new(host)?,
                         port,
+                        expect: None,
                     });
                 }
             }
@@ -779,6 +854,7 @@ impl FromStr for Target {
             return Ok(Self::Tcp {
                 host: Hostname::new(host)?,
                 port,
+                expect: None,
             });
         }
 
@@ -791,9 +867,11 @@ impl FromStr for Target {
                 let port = url
                     .port()
                     .ok_or_else(|| Error::MissingPort(scrub_target_input(input)))?;
+                let expect = extract_tcp_expect(input, &url)?;
                 Ok(Self::Tcp {
                     host: Hostname::new(host)?,
                     port,
+                    expect,
                 })
             }
             "http" | "https" => Ok(Self::Http {
@@ -1878,13 +1956,75 @@ mod tests {
     #[test]
     fn shorthand_port() {
         let t: Target = ":5432".parse().unwrap();
-        assert!(matches!(t, Target::Tcp { ref host, port: 5432 } if host.as_str() == "localhost"));
+        assert!(
+            matches!(t, Target::Tcp { ref host, port: 5432, .. } if host.as_str() == "localhost")
+        );
+    }
+
+    #[test]
+    fn tcp_expect_banner_substring() {
+        let t: Target = "tcp://host:25?expect-banner=220".parse().unwrap();
+        match t {
+            Target::Tcp { expect, .. } => match expect {
+                Some(LogMatcher::Substring(s)) => assert_eq!(s, "220"),
+                _ => panic!("expected Substring matcher"),
+            },
+            _ => panic!("expected Tcp variant"),
+        }
+    }
+
+    #[test]
+    fn tcp_expect_banner_regex_compiles() {
+        let t: Target = "tcp://host:22?expect-banner-regex=%5ESSH-2"
+            .parse()
+            .unwrap();
+        match t {
+            Target::Tcp { expect, .. } => match expect {
+                Some(LogMatcher::Regex(re)) => assert_eq!(re.as_str(), "^SSH-2"),
+                _ => panic!("expected Regex matcher"),
+            },
+            _ => panic!("expected Tcp variant"),
+        }
+    }
+
+    #[test]
+    fn tcp_expect_banner_mutually_exclusive() {
+        assert!(
+            "tcp://h:1?expect-banner=a&expect-banner-regex=b"
+                .parse::<Target>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn tcp_expect_banner_empty_rejected() {
+        assert!("tcp://h:1?expect-banner=".parse::<Target>().is_err());
+        assert!("tcp://h:1?expect-banner-regex=".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn tcp_unknown_query_rejected() {
+        assert!("tcp://h:1?foo=bar".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn tcp_display_drops_expect_when_none() {
+        let t: Target = "host:5432".parse().unwrap();
+        assert_eq!(format!("{t}"), "tcp://host:5432");
+    }
+
+    #[test]
+    fn tcp_display_includes_expect_banner() {
+        let t: Target = "tcp://host:25?expect-banner=220".parse().unwrap();
+        assert_eq!(format!("{t}"), "tcp://host:25?expect-banner=220");
     }
 
     #[test]
     fn host_port() {
         let t: Target = "db.local:5432".parse().unwrap();
-        assert!(matches!(t, Target::Tcp { ref host, port: 5432 } if host.as_str() == "db.local"));
+        assert!(
+            matches!(t, Target::Tcp { ref host, port: 5432, .. } if host.as_str() == "db.local")
+        );
     }
 
     #[test]
@@ -2105,7 +2245,7 @@ mod tests {
     #[test]
     fn ipv6_bracketed() {
         let t: Target = "[::1]:5432".parse().unwrap();
-        assert!(matches!(t, Target::Tcp { ref host, port: 5432 } if host.as_str() == "::1"));
+        assert!(matches!(t, Target::Tcp { ref host, port: 5432, .. } if host.as_str() == "::1"));
     }
 
     #[test]
@@ -2186,7 +2326,7 @@ mod tests {
     #[test]
     fn tcp_colon_form() {
         let t: Target = "tcp:host:5432".parse().unwrap();
-        assert!(matches!(t, Target::Tcp { ref host, port: 5432 } if host.as_str() == "host"));
+        assert!(matches!(t, Target::Tcp { ref host, port: 5432, .. } if host.as_str() == "host"));
     }
 
     #[test]
