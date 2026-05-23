@@ -11,6 +11,7 @@ use crate::util::sanitize_for_terminal;
 
 const INSPECT_READ_CAP: usize = 64 * 1024;
 const LOG_READ_CAP: usize = 2 * 1024 * 1024;
+const QUERY_VALUE_SAFE: &percent_encoding::AsciiSet = &PATH_SAFE.add(b'&').add(b'+').add(b'=');
 
 #[derive(Debug, thiserror::Error)]
 enum ProbeError {
@@ -118,7 +119,8 @@ async fn resolve_compose_container(
 ) -> Result<String, ProbeError> {
     let label = format!("com.docker.compose.service={service}");
     let filter_value = format!(r#"{{"label":[{}]}}"#, encode_json_string(&label));
-    let encoded = percent_encoding::utf8_percent_encode(&filter_value, PATH_SAFE).to_string();
+    let encoded =
+        percent_encoding::utf8_percent_encode(&filter_value, QUERY_VALUE_SAFE).to_string();
     let request = format!(
         "GET /containers/json?all=true&filters={encoded} HTTP/1.1\r\nHost: docker\r\nAccept: application/json\r\nConnection: close\r\nUser-Agent: holdon/{ver}\r\n\r\n",
         ver = env!("CARGO_PKG_VERSION"),
