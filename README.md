@@ -194,6 +194,8 @@ Explicit CLI flags always win over the config file. See [`examples/holdon.toml`]
 
 `--validate` parses targets and config, prints the resolved plan (targets, schedule, intervals, timeouts, per-target overrides) to stdout, and exits without probing anything. Useful in CI for catching typos in `holdon.toml` or shell-quoted target strings before they cause a real wait.
 
+`--max-attempts N` (or `HOLDON_MAX_ATTEMPTS=N`) caps retry attempts per target. Independent of `--timeout`: whichever limit hits first wins. Use to bound retries in environments where the time budget is fuzzy but you want a hard attempt count.
+
 ## Recipes
 
 ### Docker Compose

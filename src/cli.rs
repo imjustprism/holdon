@@ -244,6 +244,15 @@ pub(crate) struct Args {
           default_value_t = holdon::RunnerConfig::DEFAULT_SUCCESS_THRESHOLD)]
     pub(crate) success_threshold: u32,
 
+    #[arg(
+        long,
+        env = "HOLDON_MAX_ATTEMPTS",
+        value_name = "N",
+        value_parser = clap::value_parser!(u32).range(1..),
+        help = "Cap on retry attempts per target before giving up (in addition to --timeout)"
+    )]
+    pub(crate) max_attempts: Option<u32>,
+
     #[arg(long, env = "HOLDON_AT_LEAST")]
     pub(crate) at_least: Option<usize>,
 
