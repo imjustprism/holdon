@@ -153,6 +153,30 @@ async fn deadline_overall_timeout_respected() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn max_attempts_caps_retry_loop() {
+    let port = free_port().await;
+    let target: Target = format!("127.0.0.1:{port}").parse().unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let cfg = RunnerConfig::default()
+        .timeout(Duration::from_secs(30))
+        .attempt_timeout(Duration::from_millis(100))
+        .interval(Duration::from_millis(5))
+        .jitter(false)
+        .max_attempts(Some(3));
+    let handle = tokio::spawn(Runner::new(cfg).run(vec![target], Some(tx)));
+
+    let mut attempts = 0u32;
+    while let Some(ev) = rx.recv().await {
+        if matches!(ev, Event::Attempt { .. }) {
+            attempts += 1;
+        }
+    }
+    let report = handle.await.unwrap();
+    assert!(!report.all_ready());
+    assert_eq!(attempts, 3, "max_attempts should cap retries at 3");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn once_makes_exactly_one_attempt() {
     let port = free_port().await;
     let target: Target = format!("127.0.0.1:{port}").parse().unwrap();

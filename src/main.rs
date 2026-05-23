@@ -258,7 +258,8 @@ async fn run(args: Args) -> Result<ExitStatus> {
                 args.success_threshold
             },
         )
-        .jitter(!args.no_jitter && config_data.jitter.unwrap_or(true));
+        .jitter(!args.no_jitter && config_data.jitter.unwrap_or(true))
+        .max_attempts(args.max_attempts);
 
     let global_reverse = args.reverse || config_data.reverse.unwrap_or(false);
     let has_per_target = per_target_reverse.iter().any(Option::is_some);
@@ -743,6 +744,9 @@ fn print_plan(
     writeln!(out, "  success_threshold: {}", cfg.success_threshold)?;
     writeln!(out, "  jitter: {}", cfg.jitter)?;
     writeln!(out, "  once: {}", cfg.once)?;
+    if let Some(n) = cfg.max_attempts {
+        writeln!(out, "  max_attempts: {n}")?;
+    }
     if let Some(per) = &cfg.directions {
         writeln!(out, "  per_target_direction: {per:?}")?;
     }

@@ -39,6 +39,7 @@ pub struct RunnerConfig {
     pub jitter: bool,
     pub directions: Option<Vec<Direction>>,
     pub overrides: Option<Vec<TargetOverrides>>,
+    pub max_attempts: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -80,6 +81,7 @@ impl Default for RunnerConfig {
             jitter: true,
             directions: None,
             overrides: None,
+            max_attempts: None,
         }
     }
 }
@@ -153,6 +155,12 @@ impl RunnerConfig {
     #[must_use]
     pub fn overrides(mut self, v: Option<Vec<TargetOverrides>>) -> Self {
         self.overrides = v;
+        self
+    }
+
+    #[must_use]
+    pub const fn max_attempts(mut self, v: Option<u32>) -> Self {
+        self.max_attempts = v;
         self
     }
 }
@@ -351,6 +359,9 @@ async fn run_single(
         let satisfied = consecutive_ok >= threshold;
         if satisfied || cfg.once {
             break (outcome, satisfied);
+        }
+        if cfg.max_attempts.is_some_and(|cap| attempts >= cap.max(1)) {
+            break (outcome, false);
         }
         let now = Instant::now();
         if now >= deadline {
