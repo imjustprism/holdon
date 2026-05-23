@@ -134,18 +134,13 @@ async fn resolve_compose_container(
     }
     let containers: Vec<ComposeContainer> = serde_json::from_str(&body)
         .map_err(|e| ProbeError::Protocol(format!("invalid JSON from /containers/json: {e}")))?;
-    let mut preferred: Option<&ComposeContainer> = None;
-    let mut fallback: Option<&ComposeContainer> = None;
-    for c in &containers {
-        if c.state.eq_ignore_ascii_case(preferred_state) {
-            if preferred.is_none() {
-                preferred = Some(c);
-            }
-        } else if fallback.is_none() {
-            fallback = Some(c);
-        }
+    if containers.is_empty() {
+        return Err(ProbeError::ComposeNoMatch(service.to_owned()));
     }
-    let Some(picked) = preferred.or(fallback) else {
+    let Some(picked) = containers
+        .iter()
+        .find(|c| c.state.eq_ignore_ascii_case(preferred_state))
+    else {
         return Err(ProbeError::ComposeNoMatch(service.to_owned()));
     };
     let name = picked
