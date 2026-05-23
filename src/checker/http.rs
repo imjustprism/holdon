@@ -53,6 +53,7 @@ pub struct HttpConfig {
     pub header_expectations: Vec<(HeaderName, regex_lite::Regex)>,
     pub http2_prior_knowledge: bool,
     pub max_rtt: Option<std::time::Duration>,
+    pub max_redirects: Option<usize>,
 }
 
 impl HttpConfig {
@@ -85,8 +86,9 @@ fn client() -> &'static Client {
     CLIENT.get_or_init(|| {
         let cfg = config();
         let policy = if cfg.follow_redirects {
-            Policy::custom(|attempt| {
-                if attempt.previous().len() >= 5 {
+            let cap = cfg.max_redirects.unwrap_or(5);
+            Policy::custom(move |attempt| {
+                if attempt.previous().len() >= cap {
                     return attempt.error("too many redirects");
                 }
                 let prev_was_https = attempt

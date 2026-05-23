@@ -205,6 +205,7 @@ async fn run(args: Args) -> Result<ExitStatus> {
             header_expectations,
             http2_prior_knowledge: args.http2_prior_knowledge,
             max_rtt: args.max_rtt,
+            max_redirects: args.max_redirects,
         });
     }
 
