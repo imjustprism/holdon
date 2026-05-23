@@ -88,7 +88,7 @@ fn client() -> &'static Client {
         let policy = if cfg.follow_redirects {
             let cap = cfg.max_redirects.unwrap_or(5);
             Policy::custom(move |attempt| {
-                if attempt.previous().len() >= cap {
+                if attempt.previous().len() > cap {
                     return attempt.error("too many redirects");
                 }
                 let prev_was_https = attempt

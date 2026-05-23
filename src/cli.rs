@@ -393,6 +393,7 @@ pub(crate) struct Args {
         long,
         env = "HOLDON_MAX_REDIRECTS",
         value_name = "N",
+        conflicts_with = "no_follow_redirects",
         help = "Cap on HTTP redirects followed per probe (default 5)"
     )]
     pub(crate) max_redirects: Option<usize>,
