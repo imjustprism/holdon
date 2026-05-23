@@ -48,7 +48,7 @@ path = "src/lib.rs"
 
 [features]
 default = ["http", "json-output"]
-http = ["dep:reqwest", "dep:serde_json"]
+http = ["dep:reqwest", "dep:serde_json", "dep:serde_json_path"]
 postgres = ["dep:tokio-postgres", "dep:tokio-postgres-rustls", "dep:rustls", "dep:webpki-roots"]
 redis = ["dep:redis"]
 mysql = ["dep:mysql_async", "dep:rustls", "dep:webpki-roots"]
@@ -156,6 +156,7 @@ tonic = { version = "0.13", default-features = false, features = [
 prost = { version = "0.13", default-features = false, features = ["std", "derive"], optional = true }
 http = { version = "1.4", default-features = false, optional = true }
 serde_json = { version = "1.0", default-features = false, features = ["std"], optional = true }
+serde_json_path = { version = "0.7", default-features = false, optional = true }
 notify = { version = "8", default-features = false, features = ["macos_fsevent"], optional = true }
 tokio-tungstenite = { version = "0.28", default-features = false, features = [
   "rustls-tls-webpki-roots",

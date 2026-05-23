@@ -54,6 +54,7 @@ pub struct HttpConfig {
     pub http2_prior_knowledge: bool,
     pub max_rtt: Option<std::time::Duration>,
     pub max_redirects: Option<usize>,
+    pub jsonpath_expectations: Vec<(serde_json_path::JsonPath, String)>,
 }
 
 impl HttpConfig {
@@ -224,8 +225,11 @@ pub(super) async fn probe(url: &Url, expect: &StatusRange, ctx: AttemptCtx) -> V
     vec![stage]
 }
 
-const fn needs_body_inspection(cfg: &HttpConfig) -> bool {
-    cfg.body_substring.is_some() || cfg.body_regex.is_some() || cfg.body_json_match.is_some()
+fn needs_body_inspection(cfg: &HttpConfig) -> bool {
+    cfg.body_substring.is_some()
+        || cfg.body_regex.is_some()
+        || cfg.body_json_match.is_some()
+        || !cfg.jsonpath_expectations.is_empty()
 }
 
 fn enforce_max_rtt(cfg: &HttpConfig, stage: Stage, start: Instant) -> Stage {
@@ -308,9 +312,42 @@ fn evaluate_body_matchers(cfg: &HttpConfig, body: &str, start: Instant) -> Stage
             );
         }
     }
-    if let Some((pointer, expected)) = cfg.body_json_match.as_ref() {
-        match serde_json::from_str::<serde_json::Value>(body) {
-            Ok(value) => match value.pointer(pointer) {
+    let needs_json = !cfg.jsonpath_expectations.is_empty() || cfg.body_json_match.is_some();
+    if needs_json {
+        let value: serde_json::Value = match serde_json::from_str(body) {
+            Ok(v) => v,
+            Err(e) => {
+                return err_stage(
+                    StageKind::Http,
+                    start.elapsed(),
+                    format!("response body is not valid JSON: {e}"),
+                    Some(hints::HTTP_JSON_MISMATCH),
+                );
+            }
+        };
+        for (path, expected) in &cfg.jsonpath_expectations {
+            let Some(node) = path.query(&value).first() else {
+                return err_stage(
+                    StageKind::Http,
+                    start.elapsed(),
+                    "jsonpath matched no node in body".to_owned(),
+                    Some(hints::HTTP_JSON_MISMATCH),
+                );
+            };
+            if !json_value_matches(node, expected) {
+                return err_stage(
+                    StageKind::Http,
+                    start.elapsed(),
+                    format!(
+                        "jsonpath was `{}`, expected `{expected}`",
+                        display_json_value(node)
+                    ),
+                    Some(hints::HTTP_JSON_MISMATCH),
+                );
+            }
+        }
+        if let Some((pointer, expected)) = cfg.body_json_match.as_ref() {
+            match value.pointer(pointer) {
                 Some(found) if json_value_matches(found, expected) => {}
                 Some(found) => {
                     return err_stage(
@@ -331,14 +368,6 @@ fn evaluate_body_matchers(cfg: &HttpConfig, body: &str, start: Instant) -> Stage
                         Some(hints::HTTP_JSON_MISMATCH),
                     );
                 }
-            },
-            Err(e) => {
-                return err_stage(
-                    StageKind::Http,
-                    start.elapsed(),
-                    format!("response body is not valid JSON: {e}"),
-                    Some(hints::HTTP_JSON_MISMATCH),
-                );
             }
         }
     }

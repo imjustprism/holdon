@@ -400,6 +400,15 @@ pub(crate) struct Args {
 
     #[cfg(feature = "http")]
     #[arg(
+        long = "expect-jsonpath",
+        value_name = "EXPR=VALUE",
+        value_parser = parse_jsonpath_match,
+        help = "Require JSONPath EXPR (RFC 9535, e.g. $.items[0].name) to equal VALUE; repeatable"
+    )]
+    pub(crate) expect_jsonpath: Vec<JsonPathExpectation>,
+
+    #[cfg(feature = "http")]
+    #[arg(
         long,
         help = "Do not follow HTTP redirects, report the first response status"
     )]
@@ -496,6 +505,30 @@ fn parse_body_regex(input: &str) -> Result<regex_lite::Regex, String> {
 }
 
 #[cfg(feature = "http")]
+#[derive(Debug, Clone)]
+pub(crate) struct JsonPathExpectation {
+    pub path: serde_json_path::JsonPath,
+    pub expected: String,
+}
+
+#[cfg(feature = "http")]
+fn parse_jsonpath_match(input: &str) -> Result<JsonPathExpectation, String> {
+    let (expr, value) = input
+        .rsplit_once('=')
+        .ok_or_else(|| "expected `EXPR=VALUE`".to_owned())?;
+    let expr = expr.trim();
+    if expr.is_empty() {
+        return Err("jsonpath expression cannot be empty".into());
+    }
+    let path = serde_json_path::JsonPath::parse(expr)
+        .map_err(|e| format!("invalid jsonpath `{expr}`: {e}"))?;
+    Ok(JsonPathExpectation {
+        path,
+        expected: value.to_owned(),
+    })
+}
+
+#[cfg(feature = "http")]
 fn parse_json_match(input: &str) -> Result<(String, String), String> {
     let (pointer, value) = input
         .split_once('=')
@@ -526,7 +559,7 @@ fn parse_status_range(s: &str) -> Result<(u16, u16), String> {
 #[cfg(all(test, feature = "http"))]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::parse_header_expectation;
+    use super::{parse_header_expectation, parse_jsonpath_match};
 
     #[test]
     fn trims_pattern_whitespace() {
@@ -544,5 +577,27 @@ mod tests {
     #[test]
     fn rejects_missing_equals() {
         assert!(parse_header_expectation("nokey").is_err());
+    }
+
+    #[test]
+    fn jsonpath_simple() {
+        let e = parse_jsonpath_match("$.status=ok").unwrap();
+        assert_eq!(e.expected, "ok");
+    }
+
+    #[test]
+    fn jsonpath_filter_with_double_equals() {
+        let e = parse_jsonpath_match("$.items[?(@.id == 7)].name=seven").unwrap();
+        assert_eq!(e.expected, "seven");
+    }
+
+    #[test]
+    fn jsonpath_rejects_bad_expression() {
+        assert!(parse_jsonpath_match("not.valid.path=x").is_err());
+    }
+
+    #[test]
+    fn jsonpath_rejects_empty_expr() {
+        assert!(parse_jsonpath_match("=value").is_err());
     }
 }
