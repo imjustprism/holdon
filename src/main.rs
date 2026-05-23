@@ -293,6 +293,11 @@ async fn run(args: Args) -> Result<ExitStatus> {
         cfg
     };
 
+    if args.validate {
+        print_plan(&targets, &names, &cfg).context("writing --validate plan")?;
+        return Ok(ExitStatus::Ready);
+    }
+
     let no_color_env = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
     let color =
         !args.no_color && !no_color_env && std::io::IsTerminal::is_terminal(&std::io::stderr());
@@ -709,6 +714,43 @@ fn write_log_line(sink: &mut Option<std::io::BufWriter<std::fs::File>>, value: &
             eprintln!("holdon: --log-file write failed: {e} (further errors suppressed)");
         }
     }
+}
+
+fn print_plan(
+    targets: &[Target],
+    names: &[Option<String>],
+    cfg: &RunnerConfig,
+) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let mut out = std::io::stdout().lock();
+    writeln!(out, "holdon validate plan:")?;
+    writeln!(out, "  targets ({}):", targets.len())?;
+    for (i, t) in targets.iter().enumerate() {
+        let label = names
+            .get(i)
+            .and_then(Option::as_ref)
+            .map(|s| format!(" [{s}]"))
+            .unwrap_or_default();
+        writeln!(out, "    {i}{label}: {t}")?;
+    }
+    writeln!(out, "  schedule: {:?}", cfg.schedule)?;
+    writeln!(out, "  direction: {:?}", cfg.direction)?;
+    writeln!(out, "  overall_timeout: {:?}", cfg.overall_timeout)?;
+    writeln!(out, "  initial_interval: {:?}", cfg.initial_interval)?;
+    writeln!(out, "  max_interval: {:?}", cfg.max_interval)?;
+    writeln!(out, "  initial_delay: {:?}", cfg.initial_delay)?;
+    writeln!(out, "  attempt_timeout: {:?}", cfg.attempt_timeout)?;
+    writeln!(out, "  success_threshold: {}", cfg.success_threshold)?;
+    writeln!(out, "  jitter: {}", cfg.jitter)?;
+    writeln!(out, "  once: {}", cfg.once)?;
+    if let Some(per) = &cfg.directions {
+        writeln!(out, "  per_target_direction: {per:?}")?;
+    }
+    if let Some(per) = &cfg.overrides {
+        writeln!(out, "  per_target_overrides: {per:?}")?;
+    }
+    writeln!(out, "validation ok")?;
+    out.flush()
 }
 
 const fn signal_exit_code(sig: u8) -> u8 {
