@@ -66,6 +66,7 @@ pub(crate) mod hints {
     pub(crate) const HTTP_HEADER_ENCODING: &str = "response header contained non-ASCII bytes, the server is sending binary or non-UTF-8 data, not a regex mismatch";
     pub(crate) const HTTP_SLOW_RESPONSE: &str = "response was acceptable but exceeded the --max-rtt SLA, check upstream latency before promoting";
     pub(crate) const DNS_HINT: &str = "check hostname spelling and DNS server";
+    pub(crate) const DNS_EXPECT_MISMATCH: &str = "hostname resolved but to a different IP than ?expect-ip, propagation may still be in flight";
     pub(crate) const FILE_IO: &str = "permission or IO error reading the path";
     pub(crate) const EXEC_NOT_FOUND: &str =
         "executable not found in PATH or as relative/absolute path";
