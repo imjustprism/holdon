@@ -107,12 +107,17 @@ pub(super) async fn probe_compose(
 }
 
 async fn run_compose(service: &str, expect: &DockerExpect) -> Result<(), ProbeError> {
-    let name = resolve_compose_container(service).await?;
+    let preferred_state = expect.state.as_deref().unwrap_or("running");
+    let name = resolve_compose_container(service, preferred_state).await?;
     run(&name, expect).await
 }
 
-async fn resolve_compose_container(service: &str) -> Result<String, ProbeError> {
-    let filter_value = format!(r#"{{"label":["com.docker.compose.service={service}"]}}"#);
+async fn resolve_compose_container(
+    service: &str,
+    preferred_state: &str,
+) -> Result<String, ProbeError> {
+    let label = format!("com.docker.compose.service={service}");
+    let filter_value = format!(r#"{{"label":[{}]}}"#, encode_json_string(&label));
     let encoded = percent_encoding::utf8_percent_encode(&filter_value, PATH_SAFE).to_string();
     let request = format!(
         "GET /containers/json?all=true&filters={encoded} HTTP/1.1\r\nHost: docker\r\nAccept: application/json\r\nConnection: close\r\nUser-Agent: holdon/{ver}\r\n\r\n",
@@ -127,14 +132,18 @@ async fn resolve_compose_container(service: &str) -> Result<String, ProbeError> 
     }
     let containers: Vec<ComposeContainer> = serde_json::from_str(&body)
         .map_err(|e| ProbeError::Protocol(format!("invalid JSON from /containers/json: {e}")))?;
-    let mut best: Option<&ComposeContainer> = None;
+    let mut preferred: Option<&ComposeContainer> = None;
+    let mut fallback: Option<&ComposeContainer> = None;
     for c in &containers {
-        let already_running = best.is_some_and(|b| b.state == "running");
-        if !already_running && (best.is_none() || c.state == "running") {
-            best = Some(c);
+        if c.state.eq_ignore_ascii_case(preferred_state) {
+            if preferred.is_none() {
+                preferred = Some(c);
+            }
+        } else if fallback.is_none() {
+            fallback = Some(c);
         }
     }
-    let Some(picked) = best else {
+    let Some(picked) = preferred.or(fallback) else {
         return Err(ProbeError::ComposeNoMatch(service.to_owned()));
     };
     let name = picked
@@ -144,6 +153,27 @@ async fn resolve_compose_container(service: &str) -> Result<String, ProbeError> 
         .or_else(|| picked.names.first().cloned())
         .unwrap_or_else(|| picked.id.clone());
     Ok(name)
+}
+
+fn encode_json_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                use std::fmt::Write as _;
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 #[derive(Debug, serde::Deserialize)]
