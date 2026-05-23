@@ -391,6 +391,16 @@ pub(crate) struct Args {
     #[cfg(feature = "http")]
     #[arg(
         long,
+        env = "HOLDON_MAX_REDIRECTS",
+        value_name = "N",
+        conflicts_with = "no_follow_redirects",
+        help = "Cap on HTTP redirects followed per probe (default 5)"
+    )]
+    pub(crate) max_redirects: Option<usize>,
+
+    #[cfg(feature = "http")]
+    #[arg(
+        long,
         value_name = "PATH",
         help = "Append PEM CA certificate(s) from PATH to the bundled webpki roots"
     )]
