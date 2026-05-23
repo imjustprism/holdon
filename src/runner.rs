@@ -239,6 +239,12 @@ pub enum Event {
 
 pub type EventSink = UnboundedSender<Event>;
 
+#[derive(Debug)]
+struct PrereqChannel {
+    tx: tokio::sync::watch::Sender<Option<bool>>,
+    rx: tokio::sync::watch::Receiver<Option<bool>>,
+}
+
 impl Runner {
     #[must_use]
     pub const fn new(cfg: RunnerConfig) -> Self {
@@ -271,9 +277,11 @@ impl Runner {
                 .unwrap_or_default()
         };
         let target_count_initial = targets.len();
-        let prereq_signals: Vec<tokio::sync::watch::Sender<Option<bool>>> = (0
-            ..target_count_initial)
-            .map(|_| tokio::sync::watch::channel(None).0)
+        let prereq_signals: Vec<PrereqChannel> = (0..target_count_initial)
+            .map(|_| {
+                let (tx, rx) = tokio::sync::watch::channel(None);
+                PrereqChannel { tx, rx }
+            })
             .collect();
         let pick_prereq_rxs = |idx: usize| -> Vec<tokio::sync::watch::Receiver<Option<bool>>> {
             self.cfg
@@ -282,23 +290,24 @@ impl Runner {
                 .and_then(|v| v.get(idx))
                 .map(|deps| {
                     deps.iter()
-                        .filter_map(|&i| {
-                            prereq_signals
-                                .get(i)
-                                .map(tokio::sync::watch::Sender::subscribe)
-                        })
+                        .filter_map(|&i| prereq_signals.get(i).map(|c| c.rx.clone()))
                         .collect()
                 })
                 .unwrap_or_default()
         };
 
         if matches!(self.cfg.schedule, Schedule::Sequential) {
-            let mut results = Vec::with_capacity(targets.len());
-            for (idx, target) in targets.into_iter().enumerate() {
+            let order = topo_order(self.cfg.prereqs.as_ref(), targets.len());
+            let mut owned: Vec<Option<Target>> = targets.into_iter().map(Some).collect();
+            let mut results = Vec::with_capacity(owned.len());
+            for idx in order {
+                let Some(target) = owned[idx].take() else {
+                    continue;
+                };
                 let dir = pick_direction(idx);
                 let ov = pick_overrides(idx);
                 let prereq_rxs = pick_prereq_rxs(idx);
-                let signal = prereq_signals.get(idx).cloned();
+                let signal = prereq_signals.get(idx).map(|c| c.tx.clone());
                 let r = run_single(
                     idx,
                     target,
@@ -313,6 +322,7 @@ impl Runner {
                 .await;
                 results.push(r);
             }
+            results.sort_by_key(|r| r.idx);
             return Report {
                 results,
                 elapsed: started.elapsed(),
@@ -326,7 +336,7 @@ impl Runner {
             let dir = pick_direction(idx);
             let ov = pick_overrides(idx);
             let prereq_rxs = pick_prereq_rxs(idx);
-            let signal = prereq_signals.get(idx).cloned();
+            let signal = prereq_signals.get(idx).map(|c| c.tx.clone());
             let s = sink.clone();
             set.spawn(async move {
                 run_single(
@@ -388,8 +398,20 @@ async fn run_single(
                         return report;
                     }
                     None => {
-                        if rx.changed().await.is_err() {
-                            let report = prereq_failed_report(idx, target.clone());
+                        let now = Instant::now();
+                        if now >= deadline {
+                            let report = prereq_deadline_report(idx, target.clone());
+                            if let Some(sig) = done_signal {
+                                let _ = sig.send(Some(false));
+                            }
+                            return report;
+                        }
+                        let changed = tokio::select! {
+                            r = rx.changed() => r.is_ok(),
+                            () = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => false,
+                        };
+                        if !changed {
+                            let report = prereq_deadline_report(idx, target.clone());
                             if let Some(sig) = done_signal {
                                 let _ = sig.send(Some(false));
                             }
@@ -490,6 +512,40 @@ async fn run_single(
     }
 }
 
+fn topo_order(prereqs: Option<&Vec<Vec<usize>>>, count: usize) -> Vec<usize> {
+    let Some(graph) = prereqs else {
+        return (0..count).collect();
+    };
+    let mut indeg: Vec<usize> = vec![0; count];
+    let mut rev: Vec<Vec<usize>> = vec![Vec::new(); count];
+    for (node, deps) in graph.iter().enumerate().take(count) {
+        for &dep in deps {
+            if dep < count {
+                indeg[node] += 1;
+                rev[dep].push(node);
+            }
+        }
+    }
+    let mut queue: std::collections::VecDeque<usize> =
+        (0..count).filter(|&i| indeg[i] == 0).collect();
+    let mut out: Vec<usize> = Vec::with_capacity(count);
+    while let Some(n) = queue.pop_front() {
+        out.push(n);
+        for &m in &rev[n] {
+            indeg[m] -= 1;
+            if indeg[m] == 0 {
+                queue.push_back(m);
+            }
+        }
+    }
+    for i in 0..count {
+        if !out.contains(&i) {
+            out.push(i);
+        }
+    }
+    out
+}
+
 fn prereq_failed_report(idx: usize, target: Target) -> TargetReport {
     let stage = crate::diagnostic::Stage {
         kind: crate::diagnostic::StageKind::Exec,
@@ -497,6 +553,24 @@ fn prereq_failed_report(idx: usize, target: Target) -> TargetReport {
         result: crate::diagnostic::StageResult::Err {
             message: "skipped because a prerequisite check did not become ready".into(),
             hint: Some("fix the upstream target listed in `after = [...]`".into()),
+        },
+    };
+    TargetReport {
+        idx,
+        target,
+        attempts: 0,
+        final_outcome: CheckOutcome::failed(vec![stage], Duration::ZERO),
+        satisfied: false,
+    }
+}
+
+fn prereq_deadline_report(idx: usize, target: Target) -> TargetReport {
+    let stage = crate::diagnostic::Stage {
+        kind: crate::diagnostic::StageKind::Exec,
+        took: Duration::ZERO,
+        result: crate::diagnostic::StageResult::Err {
+            message: "overall deadline expired while waiting for a prerequisite".into(),
+            hint: Some("raise --timeout or speed up the upstream check".into()),
         },
     };
     TargetReport {

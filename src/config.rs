@@ -229,7 +229,9 @@ fn parse_durations(raw: ConfigFile, path: &Path) -> Result<Resolved> {
                         path.display()
                     );
                 }
-                prereqs_per_target[idx].push(dep_idx);
+                if !prereqs_per_target[idx].contains(&dep_idx) {
+                    prereqs_per_target[idx].push(dep_idx);
+                }
             }
         }
         detect_cycle(&prereqs_per_target, path)?;
