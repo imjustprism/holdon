@@ -141,6 +141,7 @@ The argument after `--` is the command to run once every target is ready. holdon
 | `process://<pid>`, `process://<name>` | Process exists by PID or by executable name (Windows strips `.exe`) |
 | `ws://`, `wss://`               | WebSocket handshake. Optional `?expect-text=NEEDLE` or `?expect-regex=PATTERN` waits for the first frame and matches against it |
 | `docker://name`                 | Docker container `?state=running\|paused\|exited\|...`, `?healthy=true`, plus `?log-match=NEEDLE` or `?log-regex=PATTERN` against the last 200 log lines |
+| `docker-compose://service`      | Resolves the running container with `com.docker.compose.service=<service>` label and applies the same `?state=`, `?healthy=`, `?log-match=`, `?log-regex=` options |
 | `k8s://<kind>/<ns>/<name>`      | Kubernetes pod, deployment, or job. Optional `?condition=Ready,Initialized` requires every listed condition type to report `True` (overrides the default per-kind readiness rule) |
 
 ## Feature flags

@@ -125,6 +125,10 @@ impl Target {
             Self::Docker { name, expect } => docker::probe(name, expect, ctx).await,
             #[cfg(not(feature = "docker"))]
             Self::Docker { .. } => disabled_stage(StageKind::Docker, "docker"),
+            #[cfg(feature = "docker")]
+            Self::Compose { service, expect } => docker::probe_compose(service, expect, ctx).await,
+            #[cfg(not(feature = "docker"))]
+            Self::Compose { .. } => disabled_stage(StageKind::Docker, "docker"),
             #[cfg(feature = "k8s")]
             Self::K8s {
                 kind,
