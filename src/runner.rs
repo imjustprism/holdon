@@ -363,7 +363,7 @@ async fn run_single(
         if satisfied || cfg.once {
             break (outcome, satisfied);
         }
-        if cfg.max_attempts.is_some_and(|cap| attempts >= cap.max(1)) {
+        if cfg.max_attempts.is_some_and(|cap| attempts >= cap) {
             break (outcome, false);
         }
         let now = Instant::now();
