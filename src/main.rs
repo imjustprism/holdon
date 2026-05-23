@@ -209,7 +209,7 @@ async fn run(args: Args) -> Result<ExitStatus> {
             jsonpath_expectations: args
                 .expect_jsonpath
                 .iter()
-                .map(|j| (j.expr.clone(), j.expected.clone()))
+                .map(|j| (j.path.clone(), j.expected.clone()))
                 .collect(),
         });
     }

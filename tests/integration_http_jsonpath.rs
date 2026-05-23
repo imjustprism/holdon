@@ -24,10 +24,18 @@ static INIT: Once = Once::new();
 fn install_expectations() {
     INIT.call_once(|| {
         let mut cfg = HttpConfig::defaults();
-        cfg.jsonpath_expectations
-            .push(("$.status".to_owned(), "ok".to_owned()));
-        cfg.jsonpath_expectations
-            .push(("$.items[1].name".to_owned(), "b".to_owned()));
+        cfg.jsonpath_expectations.push((
+            serde_json_path::JsonPath::parse("$.status").unwrap(),
+            "ok".to_owned(),
+        ));
+        cfg.jsonpath_expectations.push((
+            serde_json_path::JsonPath::parse("$.items[1].name").unwrap(),
+            "b".to_owned(),
+        ));
+        cfg.jsonpath_expectations.push((
+            serde_json_path::JsonPath::parse("$.items[?(@.id == 7)].name").unwrap(),
+            "seven".to_owned(),
+        ));
         set_global(cfg);
     });
 }
@@ -63,7 +71,7 @@ fn quick(timeout_ms: u64) -> RunnerConfig {
 #[tokio::test(flavor = "multi_thread")]
 async fn jsonpath_all_expectations_match() {
     install_expectations();
-    let body = r#"{"status":"ok","items":[{"name":"a"},{"name":"b"}]}"#.to_owned();
+    let body = r#"{"status":"ok","items":[{"id":1,"name":"a"},{"id":2,"name":"b"},{"id":7,"name":"seven"}]}"#.to_owned();
     let port = spawn_json_server(body).await;
     let target: Target = format!("http://127.0.0.1:{port}/").parse().unwrap();
     let report = run(quick(3000), vec![target]).await;
@@ -73,7 +81,8 @@ async fn jsonpath_all_expectations_match() {
 #[tokio::test(flavor = "multi_thread")]
 async fn jsonpath_first_expectation_mismatch_fails() {
     install_expectations();
-    let body = r#"{"status":"degraded","items":[{"name":"a"},{"name":"b"}]}"#.to_owned();
+    let body = r#"{"status":"degraded","items":[{"id":1,"name":"a"},{"id":2,"name":"b"},{"id":7,"name":"seven"}]}"#
+        .to_owned();
     let port = spawn_json_server(body).await;
     let target: Target = format!("http://127.0.0.1:{port}/").parse().unwrap();
     let report = run(quick(500), vec![target]).await;
@@ -83,11 +92,26 @@ async fn jsonpath_first_expectation_mismatch_fails() {
 #[tokio::test(flavor = "multi_thread")]
 async fn jsonpath_array_path_mismatch_fails() {
     install_expectations();
-    let body = r#"{"status":"ok","items":[{"name":"a"},{"name":"z"}]}"#.to_owned();
+    let body = r#"{"status":"ok","items":[{"id":1,"name":"a"},{"id":2,"name":"z"},{"id":7,"name":"seven"}]}"#
+        .to_owned();
     let port = spawn_json_server(body).await;
     let target: Target = format!("http://127.0.0.1:{port}/").parse().unwrap();
     let report = run(quick(500), vec![target]).await;
     assert!(!report.all_ready());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn jsonpath_filter_expression_works() {
+    install_expectations();
+    let body = r#"{"status":"ok","items":[{"id":1,"name":"a"},{"id":2,"name":"b"},{"id":7,"name":"other"}]}"#
+        .to_owned();
+    let port = spawn_json_server(body).await;
+    let target: Target = format!("http://127.0.0.1:{port}/").parse().unwrap();
+    let report = run(quick(500), vec![target]).await;
+    assert!(
+        !report.all_ready(),
+        "filter expression should reject when matched node value differs"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
