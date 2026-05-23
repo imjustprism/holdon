@@ -294,7 +294,7 @@ async fn run(args: Args) -> Result<ExitStatus> {
     };
 
     if args.validate {
-        print_plan(&targets, &names, &cfg);
+        print_plan(&targets, &names, &cfg).context("writing --validate plan")?;
         return Ok(ExitStatus::Ready);
     }
 
@@ -716,36 +716,41 @@ fn write_log_line(sink: &mut Option<std::io::BufWriter<std::fs::File>>, value: &
     }
 }
 
-fn print_plan(targets: &[Target], names: &[Option<String>], cfg: &RunnerConfig) {
+fn print_plan(
+    targets: &[Target],
+    names: &[Option<String>],
+    cfg: &RunnerConfig,
+) -> std::io::Result<()> {
     use std::io::Write as _;
     let mut out = std::io::stdout().lock();
-    let _ = writeln!(out, "holdon validate plan:");
-    let _ = writeln!(out, "  targets ({}):", targets.len());
+    writeln!(out, "holdon validate plan:")?;
+    writeln!(out, "  targets ({}):", targets.len())?;
     for (i, t) in targets.iter().enumerate() {
         let label = names
             .get(i)
             .and_then(Option::as_ref)
             .map(|s| format!(" [{s}]"))
             .unwrap_or_default();
-        let _ = writeln!(out, "    {i}{label}: {t}");
+        writeln!(out, "    {i}{label}: {t}")?;
     }
-    let _ = writeln!(out, "  schedule: {:?}", cfg.schedule);
-    let _ = writeln!(out, "  direction: {:?}", cfg.direction);
-    let _ = writeln!(out, "  overall_timeout: {:?}", cfg.overall_timeout);
-    let _ = writeln!(out, "  initial_interval: {:?}", cfg.initial_interval);
-    let _ = writeln!(out, "  max_interval: {:?}", cfg.max_interval);
-    let _ = writeln!(out, "  initial_delay: {:?}", cfg.initial_delay);
-    let _ = writeln!(out, "  attempt_timeout: {:?}", cfg.attempt_timeout);
-    let _ = writeln!(out, "  success_threshold: {}", cfg.success_threshold);
-    let _ = writeln!(out, "  jitter: {}", cfg.jitter);
-    let _ = writeln!(out, "  once: {}", cfg.once);
+    writeln!(out, "  schedule: {:?}", cfg.schedule)?;
+    writeln!(out, "  direction: {:?}", cfg.direction)?;
+    writeln!(out, "  overall_timeout: {:?}", cfg.overall_timeout)?;
+    writeln!(out, "  initial_interval: {:?}", cfg.initial_interval)?;
+    writeln!(out, "  max_interval: {:?}", cfg.max_interval)?;
+    writeln!(out, "  initial_delay: {:?}", cfg.initial_delay)?;
+    writeln!(out, "  attempt_timeout: {:?}", cfg.attempt_timeout)?;
+    writeln!(out, "  success_threshold: {}", cfg.success_threshold)?;
+    writeln!(out, "  jitter: {}", cfg.jitter)?;
+    writeln!(out, "  once: {}", cfg.once)?;
     if let Some(per) = &cfg.directions {
-        let _ = writeln!(out, "  per_target_direction: {per:?}");
+        writeln!(out, "  per_target_direction: {per:?}")?;
     }
     if let Some(per) = &cfg.overrides {
-        let _ = writeln!(out, "  per_target_overrides: {per:?}");
+        writeln!(out, "  per_target_overrides: {per:?}")?;
     }
-    let _ = writeln!(out, "validation ok");
+    writeln!(out, "validation ok")?;
+    out.flush()
 }
 
 const fn signal_exit_code(sig: u8) -> u8 {

@@ -315,6 +315,7 @@ pub(crate) struct Args {
 
     #[arg(
         long,
+        env = "HOLDON_VALIDATE",
         action = clap::ArgAction::SetTrue,
         help = "Parse targets and config, print the resolved plan to stdout, and exit without probing"
     )]
