@@ -63,8 +63,10 @@ pub enum Target {
         url: Url,
         expect: StatusRange,
     },
+    #[non_exhaustive]
     Dns {
         host: Hostname,
+        expect_ip: Option<std::net::IpAddr>,
     },
     File {
         path: PathBuf,
@@ -256,7 +258,11 @@ impl fmt::Debug for Target {
                 .field("url", &redact(url))
                 .field("expect", expect)
                 .finish(),
-            Self::Dns { host } => f.debug_struct("Dns").field("host", &host.as_str()).finish(),
+            Self::Dns { host, expect_ip } => f
+                .debug_struct("Dns")
+                .field("host", &host.as_str())
+                .field("expect_ip", expect_ip)
+                .finish(),
             Self::File { path, mode } => f
                 .debug_struct("File")
                 .field("path", path)
@@ -371,7 +377,13 @@ impl fmt::Display for Target {
                 }
             }
             Self::Http { url, .. } => write!(f, "{url}"),
-            Self::Dns { host } => write!(f, "dns://{host}"),
+            Self::Dns { host, expect_ip } => {
+                write!(f, "dns://{host}")?;
+                if let Some(ip) = expect_ip {
+                    write!(f, "?expect-ip={ip}")?;
+                }
+                Ok(())
+            }
             Self::File { path, mode } => match mode {
                 FileMode::Present => write!(f, "file://{}", path.display()),
                 FileMode::Absent => write!(f, "file://{}?mode=absent", path.display()),
@@ -515,6 +527,39 @@ fn validate_sql_identifier(input: &str, name: &str, scheme: &str) -> Result<(), 
         }
     }
     Ok(())
+}
+
+fn extract_dns_expect_ip(input: &str, url: &Url) -> Result<Option<std::net::IpAddr>> {
+    let mut found: Option<std::net::IpAddr> = None;
+    for (k, v) in url.query_pairs() {
+        match k.as_ref() {
+            "expect-ip" => {
+                if found.is_some() {
+                    return Err(parse_err(
+                        input,
+                        "dns:// `?expect-ip` may appear at most once",
+                    ));
+                }
+                if v.is_empty() {
+                    return Err(parse_err(input, "dns:// `?expect-ip` cannot be empty"));
+                }
+                let ip: std::net::IpAddr = v.parse().map_err(|_| {
+                    parse_err(
+                        input,
+                        &format!("dns:// `?expect-ip` value `{v}` is not a valid IP address"),
+                    )
+                })?;
+                found = Some(ip);
+            }
+            other => {
+                return Err(parse_err(
+                    input,
+                    &format!("unknown dns:// query key `{other}` (only `expect-ip` supported)"),
+                ));
+            }
+        }
+    }
+    Ok(found)
 }
 
 fn extract_tcp_expect(input: &str, url: &Url) -> Result<Option<LogMatcher>> {
@@ -1054,8 +1099,10 @@ impl FromStr for Target {
                 let host = url
                     .host_str()
                     .ok_or_else(|| parse_err(input, "missing host"))?;
+                let expect_ip = extract_dns_expect_ip(input, &url)?;
                 Ok(Self::Dns {
                     host: Hostname::new(host)?,
+                    expect_ip,
                 })
             }
             "file" => {
@@ -2036,7 +2083,71 @@ mod tests {
     #[test]
     fn dns_scheme() {
         let t: Target = "dns://example.com".parse().unwrap();
-        assert!(matches!(t, Target::Dns { ref host } if host.as_str() == "example.com"));
+        assert!(matches!(t, Target::Dns { ref host, .. } if host.as_str() == "example.com"));
+    }
+
+    #[test]
+    fn dns_expect_ip_v4() {
+        let t: Target = "dns://example.com?expect-ip=10.0.0.1".parse().unwrap();
+        match t {
+            Target::Dns { expect_ip, .. } => assert_eq!(
+                expect_ip,
+                Some("10.0.0.1".parse::<std::net::IpAddr>().unwrap())
+            ),
+            _ => panic!("expected Dns variant"),
+        }
+    }
+
+    #[test]
+    fn dns_expect_ip_v6() {
+        let t: Target = "dns://example.com?expect-ip=2001:db8::1".parse().unwrap();
+        match t {
+            Target::Dns { expect_ip, .. } => assert_eq!(
+                expect_ip,
+                Some("2001:db8::1".parse::<std::net::IpAddr>().unwrap())
+            ),
+            _ => panic!("expected Dns variant"),
+        }
+    }
+
+    #[test]
+    fn dns_expect_ip_invalid_rejected() {
+        assert!(
+            "dns://example.com?expect-ip=not-an-ip"
+                .parse::<Target>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn dns_expect_ip_empty_rejected() {
+        assert!("dns://example.com?expect-ip=".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn dns_expect_ip_duplicate_rejected() {
+        assert!(
+            "dns://example.com?expect-ip=1.1.1.1&expect-ip=2.2.2.2"
+                .parse::<Target>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn dns_unknown_query_rejected() {
+        assert!("dns://example.com?foo=bar".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn dns_display_drops_expect_when_none() {
+        let t: Target = "dns://example.com".parse().unwrap();
+        assert_eq!(format!("{t}"), "dns://example.com");
+    }
+
+    #[test]
+    fn dns_display_includes_expect_ip() {
+        let t: Target = "dns://example.com?expect-ip=1.2.3.4".parse().unwrap();
+        assert_eq!(format!("{t}"), "dns://example.com?expect-ip=1.2.3.4");
     }
 
     #[test]

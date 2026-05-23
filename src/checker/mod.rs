@@ -65,7 +65,7 @@ impl Target {
             Self::Tcp { host, port, expect } => {
                 tcp::probe(host.as_str(), *port, expect.as_ref(), ctx).await
             }
-            Self::Dns { host } => dns::probe(host.as_str(), ctx).await,
+            Self::Dns { host, expect_ip } => dns::probe(host.as_str(), *expect_ip, ctx).await,
             Self::File { path, mode } => file::probe(path, *mode, ctx).await,
             #[cfg(feature = "http")]
             Self::Http { url, expect } => http::probe(url, expect, ctx).await,

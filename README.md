@@ -125,7 +125,7 @@ The argument after `--` is the command to run once every target is ready. holdon
 | ------------------------------- | ----------------------------------------- |
 | `tcp://`, `:port`, `host:port`  | DNS resolve, TCP connect. Optional `?expect-banner=NEEDLE` or `?expect-banner-regex=PATTERN` reads the first 4 KiB after connect and matches against it (SMTP `220`, `SSH-2.0`, etc.) |
 | `http://`, `https://`           | TCP, TLS, HTTP request (`-H`, `--method`, `--data`, `--expect-body`, `--expect-body-regex`, `--expect-json`, `--expect-header`, `--no-follow-redirects`, `--ca-cert`, `--client-cert` + `--client-key`, `--tls-min`) |
-| `dns://`                        | Hostname resolves                         |
+| `dns://`                        | Hostname resolves. Optional `?expect-ip=1.2.3.4` (or IPv6) waits until that IP appears in the resolver's answer (DNS propagation check) |
 | `file:///path`                  | Path exists (`?mode=absent` inverse)      |
 | `postgres://`, `postgresql://`  | Connect + `SELECT 1` (TLS by default). Optional `?table=NAME` verifies a table exists in the session's current search path via parameterized `information_schema.tables`. |
 | `mysql://`, `mariadb://`        | Connect + `SELECT 1` (TLS by default). Optional `?table=NAME` verifies a table exists in the database named in the URL via parameterized `information_schema.tables`. |
