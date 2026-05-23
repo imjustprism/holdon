@@ -386,6 +386,7 @@ async fn run(args: Args) -> Result<ExitStatus> {
             if log_file.is_some() {
                 let v = serde_json::json!({
                     "v": output::json::VERSION,
+                    "ts_unix_ms": output::json::now_unix_ms(),
                     "event": "end",
                     "interrupted": true,
                 });
@@ -702,10 +703,10 @@ fn write_log_line(sink: &mut Option<std::io::BufWriter<std::fs::File>>, value: &
         return;
     };
     let result = writeln!(w, "{s}").and_then(|()| w.flush());
-    if let Err(e) = result
-        && !WARNED.swap(true, Ordering::Relaxed)
-    {
-        eprintln!("holdon: --log-file write failed: {e} (further errors suppressed)");
+    if let Err(e) = result {
+        if !WARNED.swap(true, Ordering::Relaxed) {
+            eprintln!("holdon: --log-file write failed: {e} (further errors suppressed)");
+        }
     }
 }
 
