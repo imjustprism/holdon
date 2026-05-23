@@ -40,6 +40,7 @@ pub struct RunnerConfig {
     pub directions: Option<Vec<Direction>>,
     pub overrides: Option<Vec<TargetOverrides>>,
     pub max_attempts: Option<u32>,
+    pub prereqs: Option<Vec<Vec<usize>>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -82,6 +83,7 @@ impl Default for RunnerConfig {
             directions: None,
             overrides: None,
             max_attempts: None,
+            prereqs: None,
         }
     }
 }
@@ -166,6 +168,12 @@ impl RunnerConfig {
         };
         self
     }
+
+    #[must_use]
+    pub fn prereqs(mut self, v: Option<Vec<Vec<usize>>>) -> Self {
+        self.prereqs = v;
+        self
+    }
 }
 
 #[derive(Debug)]
@@ -237,6 +245,7 @@ impl Runner {
         Self { cfg }
     }
 
+    #[allow(clippy::too_many_lines)]
     #[tracing::instrument(skip_all, fields(targets = targets.len(), schedule = ?self.cfg.schedule))]
     pub async fn run(self, targets: Vec<Target>, sink: Option<EventSink>) -> Report {
         let started = Instant::now();
@@ -261,18 +270,43 @@ impl Runner {
                 .and_then(|v| v.get(idx).cloned())
                 .unwrap_or_default()
         };
+        let target_count_initial = targets.len();
+        let prereq_signals: Vec<tokio::sync::watch::Sender<Option<bool>>> = (0
+            ..target_count_initial)
+            .map(|_| tokio::sync::watch::channel(None).0)
+            .collect();
+        let pick_prereq_rxs = |idx: usize| -> Vec<tokio::sync::watch::Receiver<Option<bool>>> {
+            self.cfg
+                .prereqs
+                .as_ref()
+                .and_then(|v| v.get(idx))
+                .map(|deps| {
+                    deps.iter()
+                        .filter_map(|&i| {
+                            prereq_signals
+                                .get(i)
+                                .map(tokio::sync::watch::Sender::subscribe)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
 
         if matches!(self.cfg.schedule, Schedule::Sequential) {
             let mut results = Vec::with_capacity(targets.len());
             for (idx, target) in targets.into_iter().enumerate() {
                 let dir = pick_direction(idx);
                 let ov = pick_overrides(idx);
+                let prereq_rxs = pick_prereq_rxs(idx);
+                let signal = prereq_signals.get(idx).cloned();
                 let r = run_single(
                     idx,
                     target,
                     self.cfg.clone(),
                     dir,
                     ov,
+                    prereq_rxs,
+                    signal,
                     deadline,
                     sink.as_ref(),
                 )
@@ -291,10 +325,23 @@ impl Runner {
             let cfg = self.cfg.clone();
             let dir = pick_direction(idx);
             let ov = pick_overrides(idx);
+            let prereq_rxs = pick_prereq_rxs(idx);
+            let signal = prereq_signals.get(idx).cloned();
             let s = sink.clone();
-            set.spawn(
-                async move { run_single(idx, target, cfg, dir, ov, deadline, s.as_ref()).await },
-            );
+            set.spawn(async move {
+                run_single(
+                    idx,
+                    target,
+                    cfg,
+                    dir,
+                    ov,
+                    prereq_rxs,
+                    signal,
+                    deadline,
+                    s.as_ref(),
+                )
+                .await
+            });
         }
 
         let mut results = Vec::with_capacity(target_count);
@@ -314,6 +361,7 @@ impl Runner {
     }
 }
 
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 #[tracing::instrument(skip_all, fields(idx, target = %target))]
 async fn run_single(
     idx: usize,
@@ -321,9 +369,37 @@ async fn run_single(
     cfg: RunnerConfig,
     direction: Direction,
     overrides: TargetOverrides,
+    prereq_rxs: Vec<tokio::sync::watch::Receiver<Option<bool>>>,
+    done_signal: Option<tokio::sync::watch::Sender<Option<bool>>>,
     deadline: Instant,
     sink: Option<&EventSink>,
 ) -> TargetReport {
+    if !prereq_rxs.is_empty() {
+        for mut rx in prereq_rxs {
+            loop {
+                let current = *rx.borrow_and_update();
+                match current {
+                    Some(true) => break,
+                    Some(false) => {
+                        let report = prereq_failed_report(idx, target.clone());
+                        if let Some(sig) = done_signal {
+                            let _ = sig.send(Some(false));
+                        }
+                        return report;
+                    }
+                    None => {
+                        if rx.changed().await.is_err() {
+                            let report = prereq_failed_report(idx, target.clone());
+                            if let Some(sig) = done_signal {
+                                let _ = sig.send(Some(false));
+                            }
+                            return report;
+                        }
+                    }
+                }
+            }
+        }
+    }
     let attempt_ctx = AttemptCtx {
         attempt_timeout: overrides
             .attempt_timeout
@@ -401,6 +477,9 @@ async fn run_single(
             satisfied,
         });
     }
+    if let Some(sig) = done_signal {
+        let _ = sig.send(Some(satisfied));
+    }
 
     TargetReport {
         idx,
@@ -408,5 +487,23 @@ async fn run_single(
         attempts,
         final_outcome,
         satisfied,
+    }
+}
+
+fn prereq_failed_report(idx: usize, target: Target) -> TargetReport {
+    let stage = crate::diagnostic::Stage {
+        kind: crate::diagnostic::StageKind::Exec,
+        took: Duration::ZERO,
+        result: crate::diagnostic::StageResult::Err {
+            message: "skipped because a prerequisite check did not become ready".into(),
+            hint: Some("fix the upstream target listed in `after = [...]`".into()),
+        },
+    };
+    TargetReport {
+        idx,
+        target,
+        attempts: 0,
+        final_outcome: CheckOutcome::failed(vec![stage], Duration::ZERO),
+        satisfied: false,
     }
 }
