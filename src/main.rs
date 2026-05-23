@@ -638,20 +638,28 @@ async fn fire_webhook(url: &str, ready: bool, report: &holdon::Report, timeout: 
 }
 
 #[cfg(feature = "http")]
+fn webhook_client() -> Option<&'static reqwest::Client> {
+    use std::sync::OnceLock;
+    static CLIENT: OnceLock<Option<reqwest::Client>> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .user_agent(concat!("holdon/", env!("CARGO_PKG_VERSION")))
+                .build()
+                .map_err(|e| eprintln!("holdon: webhook client build failed: {e}"))
+                .ok()
+        })
+        .as_ref()
+}
+
+#[cfg(feature = "http")]
 async fn send_json(url: &str, body: &str, timeout: Duration) {
-    let client = match reqwest::Client::builder()
-        .user_agent(concat!("holdon/", env!("CARGO_PKG_VERSION")))
-        .timeout(timeout)
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("holdon: webhook client build failed: {e}");
-            return;
-        }
+    let Some(client) = webhook_client() else {
+        return;
     };
     let request = client
         .post(url)
+        .timeout(timeout)
         .header("content-type", "application/json")
         .body(body.to_owned());
     match request.send().await {
@@ -767,15 +775,19 @@ async fn watch_loop(
                                         );
                                         *prev = ready;
                                         #[cfg(feature = "http")]
-                                        if let Some(hook) = on_transition.as_deref() {
-                                            fire_transition_webhook(
-                                                hook,
-                                                idx,
-                                                &target,
-                                                ready,
-                                                webhook_timeout,
-                                            )
-                                            .await;
+                                        if let Some(hook) = on_transition.clone() {
+                                            let target_clone = target.clone();
+                                            let timeout_clone = webhook_timeout;
+                                            tokio::spawn(async move {
+                                                fire_transition_webhook(
+                                                    &hook,
+                                                    idx,
+                                                    &target_clone,
+                                                    ready,
+                                                    timeout_clone,
+                                                )
+                                                .await;
+                                            });
                                         }
                                     }
                                 }
