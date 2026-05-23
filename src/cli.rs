@@ -300,6 +300,16 @@ pub(crate) struct Args {
     )]
     pub(crate) webhook_timeout: Duration,
 
+    #[cfg(feature = "http")]
+    #[arg(
+        long,
+        env = "HOLDON_ON_TRANSITION",
+        value_name = "URL",
+        value_parser = parse_webhook_url,
+        help = "POST a JSON event to this URL each time a --watch target flips between ready and fail"
+    )]
+    pub(crate) on_transition: Option<String>,
+
     #[arg(long, env = "HOLDON_TIMEOUT_EXIT_CODE", default_value_t = crate::DEFAULT_TIMEOUT_EXIT_CODE)]
     pub(crate) timeout_exit_code: u8,
 

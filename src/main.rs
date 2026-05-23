@@ -400,6 +400,10 @@ async fn run(args: Args) -> Result<ExitStatus> {
             watch_attempt_timeouts,
             args.watch_interval,
             watch_reverse,
+            #[cfg(feature = "http")]
+            args.on_transition.clone(),
+            #[cfg(feature = "http")]
+            args.webhook_timeout,
             &interrupted,
         )
         .await;
@@ -630,21 +634,34 @@ async fn fire_webhook(url: &str, ready: bool, report: &holdon::Report, timeout: 
             "attempts": r.attempts,
         })).collect::<Vec<_>>(),
     });
-    let client = match reqwest::Client::builder()
-        .user_agent(concat!("holdon/", env!("CARGO_PKG_VERSION")))
-        .timeout(timeout)
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("holdon: webhook client build failed: {e}");
-            return;
-        }
+    send_json(url, &body.to_string(), timeout).await;
+}
+
+#[cfg(feature = "http")]
+fn webhook_client() -> Option<&'static reqwest::Client> {
+    use std::sync::OnceLock;
+    static CLIENT: OnceLock<Option<reqwest::Client>> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .user_agent(concat!("holdon/", env!("CARGO_PKG_VERSION")))
+                .build()
+                .map_err(|e| eprintln!("holdon: webhook client build failed: {e}"))
+                .ok()
+        })
+        .as_ref()
+}
+
+#[cfg(feature = "http")]
+async fn send_json(url: &str, body: &str, timeout: Duration) {
+    let Some(client) = webhook_client() else {
+        return;
     };
     let request = client
         .post(url)
+        .timeout(timeout)
         .header("content-type", "application/json")
-        .body(body.to_string());
+        .body(body.to_owned());
     match request.send().await {
         Ok(resp) => {
             let status = resp.status();
@@ -658,12 +675,45 @@ async fn fire_webhook(url: &str, ready: bool, report: &holdon::Report, timeout: 
     }
 }
 
+#[cfg(feature = "http")]
+async fn drain_webhooks(set: &mut tokio::task::JoinSet<()>, per_task_timeout: Duration) {
+    let budget = per_task_timeout.saturating_add(Duration::from_millis(500));
+    let _ = tokio::time::timeout(budget, async { while set.join_next().await.is_some() {} }).await;
+    set.abort_all();
+}
+
+#[cfg(feature = "http")]
+async fn fire_transition_webhook(
+    url: &str,
+    idx: usize,
+    target: &Target,
+    ready: bool,
+    timeout: Duration,
+) {
+    use serde_json::json;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let body = json!({
+        "event": "transition",
+        "idx": idx,
+        "target": target.to_string(),
+        "transition": if ready { "fail->ready" } else { "ready->fail" },
+        "ready": ready,
+        "at": now,
+    });
+    send_json(url, &body.to_string(), timeout).await;
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 async fn watch_loop(
     targets: Vec<Target>,
     initial_ready: Vec<bool>,
     attempt_timeouts: Vec<Duration>,
     interval: Duration,
     reverse_per_target: Vec<bool>,
+    #[cfg(feature = "http")] on_transition: Option<String>,
+    #[cfg(feature = "http")] webhook_timeout: Duration,
     interrupted: &Arc<AtomicU8>,
 ) {
     use std::io::Write as _;
@@ -678,6 +728,8 @@ async fn watch_loop(
         );
         return;
     }
+    #[cfg(feature = "http")]
+    let mut webhook_tasks: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
     let _ = writeln!(
         std::io::stderr(),
         "holdon: watch mode, interval={}s (Ctrl-C to exit)",
@@ -691,6 +743,8 @@ async fn watch_loop(
             biased;
             _ = wait_interrupt(interrupted) => {
                 let _ = writeln!(std::io::stderr(), "holdon: watch exiting on signal");
+                #[cfg(feature = "http")]
+                drain_webhooks(&mut webhook_tasks, webhook_timeout).await;
                 return;
             }
             _ = ticker.tick() => {
@@ -731,6 +785,21 @@ async fn watch_loop(
                                             "holdon: [{idx}] {target}: {arrow}"
                                         );
                                         *prev = ready;
+                                        #[cfg(feature = "http")]
+                                        if let Some(hook) = on_transition.clone() {
+                                            let target_clone = target.clone();
+                                            let timeout_clone = webhook_timeout;
+                                            webhook_tasks.spawn(async move {
+                                                fire_transition_webhook(
+                                                    &hook,
+                                                    idx,
+                                                    &target_clone,
+                                                    ready,
+                                                    timeout_clone,
+                                                )
+                                                .await;
+                                            });
+                                        }
                                     }
                                 }
                             }
@@ -741,6 +810,8 @@ async fn watch_loop(
                 }
                 if aborted {
                     let _ = writeln!(std::io::stderr(), "holdon: watch exiting on signal");
+                    #[cfg(feature = "http")]
+                    drain_webhooks(&mut webhook_tasks, webhook_timeout).await;
                     return;
                 }
             }
