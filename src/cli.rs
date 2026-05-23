@@ -248,6 +248,7 @@ pub(crate) struct Args {
         long,
         env = "HOLDON_MAX_ATTEMPTS",
         value_name = "N",
+        value_parser = clap::value_parser!(u32).range(1..),
         help = "Cap on retry attempts per target before giving up (in addition to --timeout)"
     )]
     pub(crate) max_attempts: Option<u32>,

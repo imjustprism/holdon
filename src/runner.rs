@@ -160,7 +160,10 @@ impl RunnerConfig {
 
     #[must_use]
     pub const fn max_attempts(mut self, v: Option<u32>) -> Self {
-        self.max_attempts = v;
+        self.max_attempts = match v {
+            Some(0) => Some(1),
+            other => other,
+        };
         self
     }
 }
