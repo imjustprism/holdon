@@ -313,9 +313,22 @@ async fn run(args: Args) -> Result<ExitStatus> {
     } else {
         Some(&args.exec)
     };
-    printer.banner(&targets, &names, exec_slice);
     #[cfg(feature = "json-output")]
-    write_log_line(&mut log_file, &output::json::start_value(&targets, &names));
+    {
+        if printer.is_json() || log_file.is_some() {
+            let v = output::json::start_value(&targets, &names);
+            if printer.is_json() {
+                output::json::emit_value(&v);
+            } else {
+                printer.banner(&targets, &names, exec_slice);
+            }
+            write_log_line(&mut log_file, &v);
+        } else {
+            printer.banner(&targets, &names, exec_slice);
+        }
+    }
+    #[cfg(not(feature = "json-output"))]
+    printer.banner(&targets, &names, exec_slice);
 
     install_panic_hook();
     init_tracing(args.verbose);
@@ -334,11 +347,25 @@ async fn run(args: Args) -> Result<ExitStatus> {
             biased;
             ev = rx.recv() => match ev {
                 Some(ev) => {
-                    printer.handle(&ev);
                     #[cfg(feature = "json-output")]
-                    if let Some(v) = output::json::event_value(&ev) {
-                        write_log_line(&mut log_file, &v);
+                    {
+                        if printer.is_json() || log_file.is_some() {
+                            if let Some(v) = output::json::event_value(&ev) {
+                                if printer.is_json() {
+                                    output::json::emit_value(&v);
+                                } else {
+                                    printer.handle(&ev);
+                                }
+                                write_log_line(&mut log_file, &v);
+                            } else if !printer.is_json() {
+                                printer.handle(&ev);
+                            }
+                        } else {
+                            printer.handle(&ev);
+                        }
                     }
+                    #[cfg(not(feature = "json-output"))]
+                    printer.handle(&ev);
                 }
                 None => break,
             },
@@ -355,6 +382,15 @@ async fn run(args: Args) -> Result<ExitStatus> {
         Ok(r) => r,
         Err(je) if je.is_cancelled() => {
             eprintln!("holdon: interrupted");
+            #[cfg(feature = "json-output")]
+            if log_file.is_some() {
+                let v = serde_json::json!({
+                    "v": output::json::VERSION,
+                    "event": "end",
+                    "interrupted": true,
+                });
+                write_log_line(&mut log_file, &v);
+            }
             return Ok(ExitStatus::Signal(signal_exit_code(signal_fired)));
         }
         Err(je) => {
@@ -362,11 +398,26 @@ async fn run(args: Args) -> Result<ExitStatus> {
         }
     };
 
-    printer.summary(&report, exec_slice);
     #[cfg(feature = "json-output")]
-    for v in output::json::summary_values(&report) {
-        write_log_line(&mut log_file, &v);
+    {
+        if printer.is_json() || log_file.is_some() {
+            let values = output::json::summary_values(&report);
+            if printer.is_json() {
+                for v in &values {
+                    output::json::emit_value(v);
+                }
+            } else {
+                printer.summary(&report, exec_slice);
+            }
+            for v in &values {
+                write_log_line(&mut log_file, v);
+            }
+        } else {
+            printer.summary(&report, exec_slice);
+        }
     }
+    #[cfg(not(feature = "json-output"))]
+    printer.summary(&report, exec_slice);
 
     let at_least = args.at_least.or(config_data.at_least);
     let ready = if let Some(n) = at_least {
@@ -642,11 +693,19 @@ fn open_log_file(
 #[cfg(feature = "json-output")]
 fn write_log_line(sink: &mut Option<std::io::BufWriter<std::fs::File>>, value: &serde_json::Value) {
     use std::io::Write as _;
-    if let Some(w) = sink.as_mut() {
-        if let Ok(s) = serde_json::to_string(value) {
-            let _ = writeln!(w, "{s}");
-            let _ = w.flush();
-        }
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static WARNED: AtomicBool = AtomicBool::new(false);
+    let Some(w) = sink.as_mut() else {
+        return;
+    };
+    let Ok(s) = serde_json::to_string(value) else {
+        return;
+    };
+    let result = writeln!(w, "{s}").and_then(|()| w.flush());
+    if let Err(e) = result
+        && !WARNED.swap(true, Ordering::Relaxed)
+    {
+        eprintln!("holdon: --log-file write failed: {e} (further errors suppressed)");
     }
 }
 

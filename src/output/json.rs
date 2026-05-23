@@ -111,6 +111,10 @@ impl Json {
     }
 }
 
+pub(crate) fn emit_value(v: &Value) {
+    emit(v);
+}
+
 fn target_event(r: &TargetReport) -> Value {
     json!({
         "v": VERSION,

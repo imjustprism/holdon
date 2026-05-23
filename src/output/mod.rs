@@ -29,6 +29,11 @@ pub(crate) enum Printer {
 }
 
 impl Printer {
+    #[cfg(feature = "json-output")]
+    pub(crate) const fn is_json(&self) -> bool {
+        matches!(self, Self::Json(_))
+    }
+
     pub(crate) fn new(format: Format, color: bool) -> Self {
         match format {
             Format::Plain => Self::Plain(Plain::new(color)),
