@@ -293,6 +293,11 @@ async fn run(args: Args) -> Result<ExitStatus> {
         cfg
     };
 
+    if args.validate {
+        print_plan(&targets, &names, &cfg);
+        return Ok(ExitStatus::Ready);
+    }
+
     let no_color_env = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
     let color =
         !args.no_color && !no_color_env && std::io::IsTerminal::is_terminal(&std::io::stderr());
@@ -709,6 +714,38 @@ fn write_log_line(sink: &mut Option<std::io::BufWriter<std::fs::File>>, value: &
             eprintln!("holdon: --log-file write failed: {e} (further errors suppressed)");
         }
     }
+}
+
+fn print_plan(targets: &[Target], names: &[Option<String>], cfg: &RunnerConfig) {
+    use std::io::Write as _;
+    let mut out = std::io::stdout().lock();
+    let _ = writeln!(out, "holdon validate plan:");
+    let _ = writeln!(out, "  targets ({}):", targets.len());
+    for (i, t) in targets.iter().enumerate() {
+        let label = names
+            .get(i)
+            .and_then(Option::as_ref)
+            .map(|s| format!(" [{s}]"))
+            .unwrap_or_default();
+        let _ = writeln!(out, "    {i}{label}: {t}");
+    }
+    let _ = writeln!(out, "  schedule: {:?}", cfg.schedule);
+    let _ = writeln!(out, "  direction: {:?}", cfg.direction);
+    let _ = writeln!(out, "  overall_timeout: {:?}", cfg.overall_timeout);
+    let _ = writeln!(out, "  initial_interval: {:?}", cfg.initial_interval);
+    let _ = writeln!(out, "  max_interval: {:?}", cfg.max_interval);
+    let _ = writeln!(out, "  initial_delay: {:?}", cfg.initial_delay);
+    let _ = writeln!(out, "  attempt_timeout: {:?}", cfg.attempt_timeout);
+    let _ = writeln!(out, "  success_threshold: {}", cfg.success_threshold);
+    let _ = writeln!(out, "  jitter: {}", cfg.jitter);
+    let _ = writeln!(out, "  once: {}", cfg.once);
+    if let Some(per) = &cfg.directions {
+        let _ = writeln!(out, "  per_target_direction: {per:?}");
+    }
+    if let Some(per) = &cfg.overrides {
+        let _ = writeln!(out, "  per_target_overrides: {per:?}");
+    }
+    let _ = writeln!(out, "validation ok");
 }
 
 const fn signal_exit_code(sig: u8) -> u8 {

@@ -192,6 +192,8 @@ Explicit CLI flags always win over the config file. See [`examples/holdon.toml`]
 
 `--log-file PATH` (or `HOLDON_LOG_FILE=PATH`) appends one JSON event per line to a file in addition to the terminal output. Each line carries `v`, `ts_unix_ms`, and an `event` field (`start`, `attempt`, `target`, or `end`). The file is opened in append mode so multiple runs accumulate.
 
+`--validate` parses targets and config, prints the resolved plan (targets, schedule, intervals, timeouts, per-target overrides) to stdout, and exits without probing anything. Useful in CI for catching typos in `holdon.toml` or shell-quoted target strings before they cause a real wait.
+
 ## Recipes
 
 ### Docker Compose

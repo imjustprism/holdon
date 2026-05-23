@@ -315,6 +315,13 @@ pub(crate) struct Args {
 
     #[arg(
         long,
+        action = clap::ArgAction::SetTrue,
+        help = "Parse targets and config, print the resolved plan to stdout, and exit without probing"
+    )]
+    pub(crate) validate: bool,
+
+    #[arg(
+        long,
         env = "HOLDON_LOG_FILE",
         value_name = "PATH",
         help = "Append every event as a JSON line to this file (in addition to the terminal output)"
