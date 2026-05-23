@@ -2151,6 +2151,12 @@ mod tests {
     }
 
     #[test]
+    fn dns_display_roundtrip_ipv6() {
+        let t: Target = "dns://example.com?expect-ip=2001:db8::1".parse().unwrap();
+        assert_eq!(format!("{t}"), "dns://example.com?expect-ip=2001:db8::1");
+    }
+
+    #[test]
     fn postgres_url() {
         let t: Target = "postgres://app@db:5432/x".parse().unwrap();
         assert!(matches!(

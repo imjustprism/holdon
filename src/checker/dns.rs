@@ -25,7 +25,7 @@ pub(super) async fn probe(host: &str, expect_ip: Option<IpAddr>, ctx: AttemptCtx
                 err_stage(
                     StageKind::Dns,
                     start.elapsed(),
-                    format!("resolved to {} but expected {want}", got.join(",")),
+                    format!("resolved to {} but expected {want}", got.join(", ")),
                     Some(hints::DNS_EXPECT_MISMATCH),
                 )
             }
