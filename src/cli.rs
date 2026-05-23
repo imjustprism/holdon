@@ -313,6 +313,14 @@ pub(crate) struct Args {
     #[arg(long, env = "HOLDON_TIMEOUT_EXIT_CODE", default_value_t = crate::DEFAULT_TIMEOUT_EXIT_CODE)]
     pub(crate) timeout_exit_code: u8,
 
+    #[arg(
+        long,
+        env = "HOLDON_LOG_FILE",
+        value_name = "PATH",
+        help = "Append every event as a JSON line to this file (in addition to the terminal output)"
+    )]
+    pub(crate) log_file: Option<std::path::PathBuf>,
+
     #[arg(long, action = clap::ArgAction::SetTrue)]
     pub(crate) no_color: bool,
 
