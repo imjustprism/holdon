@@ -153,6 +153,102 @@ async fn deadline_overall_timeout_respected() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn prereqs_gate_dependent_target() {
+    let (l_a, p_a) = bind_ephemeral().await;
+    let _open_a = Box::leak(Box::new(l_a));
+    let (l_b, p_b) = bind_ephemeral().await;
+    let _open_b = Box::leak(Box::new(l_b));
+    let prereqs = vec![Vec::new(), vec![0usize]];
+    let cfg = RunnerConfig::default()
+        .timeout(Duration::from_secs(3))
+        .attempt_timeout(Duration::from_millis(200))
+        .once(true)
+        .prereqs(Some(prereqs));
+    let targets: Vec<Target> = [p_a, p_b]
+        .iter()
+        .map(|p| format!("127.0.0.1:{p}").parse().unwrap())
+        .collect();
+    let report = Runner::new(cfg).run(targets, None).await;
+    assert!(report.all_ready(), "both targets should be satisfied");
+    assert_eq!(report.results.len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn prereqs_sequential_reorders_by_dependency() {
+    let (l_a, p_a) = bind_ephemeral().await;
+    let _open_a = Box::leak(Box::new(l_a));
+    let (l_b, p_b) = bind_ephemeral().await;
+    let _open_b = Box::leak(Box::new(l_b));
+    let prereqs = vec![vec![1usize], Vec::new()];
+    let cfg = RunnerConfig::default()
+        .timeout(Duration::from_secs(3))
+        .attempt_timeout(Duration::from_millis(200))
+        .sequential(true)
+        .once(true)
+        .prereqs(Some(prereqs));
+    let targets: Vec<Target> = [p_a, p_b]
+        .iter()
+        .map(|p| format!("127.0.0.1:{p}").parse().unwrap())
+        .collect();
+    let start = Instant::now();
+    let report = Runner::new(cfg).run(targets, None).await;
+    let elapsed = start.elapsed();
+    assert!(
+        report.all_ready(),
+        "sequential mode with backwards dependency should still complete"
+    );
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "sequential mode should not deadlock, elapsed={elapsed:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn prereqs_deadline_marks_dependent_not_ready() {
+    let port_closed = free_port().await;
+    let (l_b, p_b) = bind_ephemeral().await;
+    let _open_b = Box::leak(Box::new(l_b));
+    let prereqs = vec![Vec::new(), vec![0usize]];
+    let cfg = RunnerConfig::default()
+        .timeout(Duration::from_millis(400))
+        .attempt_timeout(Duration::from_millis(100))
+        .interval(Duration::from_millis(50))
+        .prereqs(Some(prereqs));
+    let targets: Vec<Target> = [port_closed, p_b]
+        .iter()
+        .map(|p| format!("127.0.0.1:{p}").parse().unwrap())
+        .collect();
+    let report = Runner::new(cfg).run(targets, None).await;
+    assert!(!report.all_ready());
+    let dep = report.results.iter().find(|r| r.idx == 1).unwrap();
+    assert!(!dep.satisfied);
+    assert_eq!(dep.attempts, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn prereqs_fail_short_circuits_dependent() {
+    let port_closed = free_port().await;
+    let (l_b, p_b) = bind_ephemeral().await;
+    let _open_b = Box::leak(Box::new(l_b));
+    let prereqs = vec![Vec::new(), vec![0usize]];
+    let cfg = RunnerConfig::default()
+        .timeout(Duration::from_millis(800))
+        .attempt_timeout(Duration::from_millis(100))
+        .interval(Duration::from_millis(50))
+        .max_attempts(Some(3))
+        .prereqs(Some(prereqs));
+    let targets: Vec<Target> = [port_closed, p_b]
+        .iter()
+        .map(|p| format!("127.0.0.1:{p}").parse().unwrap())
+        .collect();
+    let report = Runner::new(cfg).run(targets, None).await;
+    assert!(!report.all_ready());
+    let dep = report.results.iter().find(|r| r.idx == 1).unwrap();
+    assert!(!dep.satisfied, "dependent target should not be satisfied");
+    assert_eq!(dep.attempts, 0, "dependent target should never have probed");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn max_attempts_caps_retry_loop() {
     let port = free_port().await;
     let target: Target = format!("127.0.0.1:{port}").parse().unwrap();

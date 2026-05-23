@@ -93,6 +93,8 @@ async fn run(args: Args) -> Result<ExitStatus> {
         std::iter::repeat_n(None, raw_targets.len()).collect();
     let mut per_target_overrides: Vec<config::PerTargetOverride> =
         std::iter::repeat_n(config::PerTargetOverride::default(), raw_targets.len()).collect();
+    let mut prereqs_per_target: Vec<Vec<usize>> =
+        std::iter::repeat_n(Vec::new(), raw_targets.len()).collect();
     let config_target_count = raw_targets.len() - cli_count;
     if config_target_count > 0 {
         for (i, n) in config_data
@@ -121,6 +123,14 @@ async fn run(args: Args) -> Result<ExitStatus> {
             .enumerate()
         {
             per_target_overrides[cli_count + i] = o;
+        }
+        for (i, deps) in config_data
+            .prereqs_per_target
+            .iter()
+            .take(config_target_count)
+            .enumerate()
+        {
+            prereqs_per_target[cli_count + i] = deps.iter().map(|&d| d + cli_count).collect();
         }
     }
     let resolved_targets: Vec<String> = raw_targets
@@ -295,6 +305,13 @@ async fn run(args: Args) -> Result<ExitStatus> {
             .map(Into::into)
             .collect();
         cfg.overrides(Some(overrides))
+    } else {
+        cfg
+    };
+
+    let has_any_prereq = prereqs_per_target.iter().any(|p| !p.is_empty());
+    let cfg = if has_any_prereq {
+        cfg.prereqs(Some(prereqs_per_target.clone()))
     } else {
         cfg
     };
@@ -757,6 +774,9 @@ fn print_plan(
     }
     if let Some(per) = &cfg.overrides {
         writeln!(out, "  per_target_overrides: {per:?}")?;
+    }
+    if let Some(per) = &cfg.prereqs {
+        writeln!(out, "  per_target_prereqs: {per:?}")?;
     }
     writeln!(out, "validation ok")?;
     out.flush()

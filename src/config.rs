@@ -35,6 +35,8 @@ pub(crate) struct CheckEntry {
     pub interval: Option<String>,
     pub attempt_timeout: Option<String>,
     pub success_threshold: Option<u32>,
+    #[serde(default)]
+    pub after: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -54,6 +56,7 @@ pub(crate) struct Resolved {
     pub names: Vec<Option<String>>,
     pub reverse_per_target: Vec<Option<bool>>,
     pub overrides_per_target: Vec<PerTargetOverride>,
+    pub prereqs_per_target: Vec<Vec<usize>>,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -114,6 +117,7 @@ fn auto_detect() -> Option<PathBuf> {
     None
 }
 
+#[allow(clippy::too_many_lines)]
 fn parse_durations(raw: ConfigFile, path: &Path) -> Result<Resolved> {
     let dur = |field: &str, value: Option<String>| -> Result<Option<Duration>> {
         let Some(s) = value else { return Ok(None) };
@@ -130,6 +134,9 @@ fn parse_durations(raw: ConfigFile, path: &Path) -> Result<Resolved> {
         std::iter::repeat_n(None, targets.len()).collect();
     let mut overrides_per_target: Vec<PerTargetOverride> =
         std::iter::repeat_n(PerTargetOverride::default(), targets.len()).collect();
+    let mut prereqs_per_target: Vec<Vec<usize>> =
+        std::iter::repeat_n(Vec::new(), targets.len()).collect();
+    let mut after_refs: Vec<Vec<String>> = std::iter::repeat_n(Vec::new(), targets.len()).collect();
     for (i, entry) in raw.check.into_iter().enumerate() {
         let one = i + 1;
         if entry.target.trim().is_empty() {
@@ -178,10 +185,56 @@ fn parse_durations(raw: ConfigFile, path: &Path) -> Result<Resolved> {
             attempt_timeout: entry_attempt_timeout,
             success_threshold: entry.success_threshold,
         };
+        for dep in &entry.after {
+            if dep.trim().is_empty() {
+                bail!(
+                    "{}: [[check]] #{i} has an empty `after` entry",
+                    path.display(),
+                    i = one
+                );
+            }
+        }
         targets.push(entry.target);
         names.push(entry.name);
         reverse_per_target.push(direction);
         overrides_per_target.push(override_entry);
+        prereqs_per_target.push(Vec::new());
+        after_refs.push(entry.after);
+    }
+
+    if after_refs.iter().any(|a| !a.is_empty()) {
+        let mut name_to_idx: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::new();
+        for (idx, n) in names.iter().enumerate() {
+            if let Some(s) = n {
+                if name_to_idx.insert(s.as_str(), idx).is_some() {
+                    bail!(
+                        "{}: duplicate check name `{s}` (after-references need unique names)",
+                        path.display()
+                    );
+                }
+            }
+        }
+        for (idx, deps) in after_refs.iter().enumerate() {
+            for dep in deps {
+                let Some(&dep_idx) = name_to_idx.get(dep.as_str()) else {
+                    bail!(
+                        "{}: [[check]] index {idx} references unknown after = `{dep}`",
+                        path.display()
+                    );
+                };
+                if dep_idx == idx {
+                    bail!(
+                        "{}: [[check]] `{dep}` cannot depend on itself",
+                        path.display()
+                    );
+                }
+                if !prereqs_per_target[idx].contains(&dep_idx) {
+                    prereqs_per_target[idx].push(dep_idx);
+                }
+            }
+        }
+        detect_cycle(&prereqs_per_target, path)?;
     }
     Ok(Resolved {
         interval: dur("interval", raw.interval)?,
@@ -199,7 +252,48 @@ fn parse_durations(raw: ConfigFile, path: &Path) -> Result<Resolved> {
         names,
         reverse_per_target,
         overrides_per_target,
+        prereqs_per_target,
     })
+}
+
+fn detect_cycle(prereqs: &[Vec<usize>], path: &Path) -> Result<()> {
+    const WHITE: u8 = 0;
+    const GRAY: u8 = 1;
+    const BLACK: u8 = 2;
+    let mut color = vec![WHITE; prereqs.len()];
+    let mut stack: Vec<(usize, usize)> = Vec::new();
+    for start in 0..prereqs.len() {
+        if color[start] != WHITE {
+            continue;
+        }
+        stack.push((start, 0));
+        color[start] = GRAY;
+        while let Some(&(node, idx)) = stack.last() {
+            if idx >= prereqs[node].len() {
+                color[node] = BLACK;
+                stack.pop();
+                continue;
+            }
+            let next = prereqs[node][idx];
+            if let Some(top) = stack.last_mut() {
+                top.1 = idx + 1;
+            }
+            match color[next] {
+                WHITE => {
+                    color[next] = GRAY;
+                    stack.push((next, 0));
+                }
+                GRAY => {
+                    bail!(
+                        "{}: cyclic check dependency detected involving index {next}",
+                        path.display()
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -349,6 +443,95 @@ mod tests {
     fn check_no_overrides_yields_empty_per_target() {
         let r = parse("[[check]]\ntarget = \":1\"\n").unwrap();
         assert!(!r.overrides_per_target[0].is_some());
+    }
+
+    #[test]
+    fn check_after_resolves_to_prereqs() {
+        let r = parse(
+            "[[check]]\n\
+             name = \"db\"\n\
+             target = \":1\"\n\
+             [[check]]\n\
+             name = \"api\"\n\
+             target = \":2\"\n\
+             after = [\"db\"]\n",
+        )
+        .unwrap();
+        assert_eq!(r.prereqs_per_target.len(), 2);
+        assert!(r.prereqs_per_target[0].is_empty());
+        assert_eq!(r.prereqs_per_target[1], vec![0]);
+    }
+
+    #[test]
+    fn check_after_unknown_name_rejected() {
+        let err = parse(
+            "[[check]]\n\
+             name = \"api\"\n\
+             target = \":2\"\n\
+             after = [\"nope\"]\n",
+        )
+        .unwrap_err();
+        let s = format!("{err:#}");
+        assert!(s.contains("unknown after"), "got: {s}");
+    }
+
+    #[test]
+    fn check_after_self_reference_rejected() {
+        let err = parse(
+            "[[check]]\n\
+             name = \"a\"\n\
+             target = \":1\"\n\
+             after = [\"a\"]\n",
+        )
+        .unwrap_err();
+        let s = format!("{err:#}");
+        assert!(s.contains("cannot depend on itself"), "got: {s}");
+    }
+
+    #[test]
+    fn check_after_cycle_rejected() {
+        let err = parse(
+            "[[check]]\n\
+             name = \"a\"\n\
+             target = \":1\"\n\
+             after = [\"b\"]\n\
+             [[check]]\n\
+             name = \"b\"\n\
+             target = \":2\"\n\
+             after = [\"a\"]\n",
+        )
+        .unwrap_err();
+        let s = format!("{err:#}");
+        assert!(s.contains("cyclic"), "got: {s}");
+    }
+
+    #[test]
+    fn check_after_empty_entry_rejected() {
+        let err = parse(
+            "[[check]]\n\
+             name = \"a\"\n\
+             target = \":1\"\n\
+             after = [\"\"]\n",
+        )
+        .unwrap_err();
+        let s = format!("{err:#}");
+        assert!(s.contains("empty `after`"), "got: {s}");
+    }
+
+    #[test]
+    fn check_after_duplicate_names_rejected() {
+        let err = parse(
+            "[[check]]\n\
+             name = \"a\"\n\
+             target = \":1\"\n\
+             [[check]]\n\
+             name = \"a\"\n\
+             target = \":2\"\n\
+             after = [\"a\"]\n",
+        )
+        .unwrap_err();
+        let s = format!("{err:#}");
+        assert!(s.contains("duplicate check name"), "got: {s}");
     }
 
     #[test]
