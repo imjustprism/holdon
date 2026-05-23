@@ -54,6 +54,7 @@ pub struct HttpConfig {
     pub http2_prior_knowledge: bool,
     pub max_rtt: Option<std::time::Duration>,
     pub max_redirects: Option<usize>,
+    pub jsonpath_expectations: Vec<(String, String)>,
 }
 
 impl HttpConfig {
@@ -224,8 +225,11 @@ pub(super) async fn probe(url: &Url, expect: &StatusRange, ctx: AttemptCtx) -> V
     vec![stage]
 }
 
-const fn needs_body_inspection(cfg: &HttpConfig) -> bool {
-    cfg.body_substring.is_some() || cfg.body_regex.is_some() || cfg.body_json_match.is_some()
+fn needs_body_inspection(cfg: &HttpConfig) -> bool {
+    cfg.body_substring.is_some()
+        || cfg.body_regex.is_some()
+        || cfg.body_json_match.is_some()
+        || !cfg.jsonpath_expectations.is_empty()
 }
 
 fn enforce_max_rtt(cfg: &HttpConfig, stage: Stage, start: Instant) -> Stage {
@@ -306,6 +310,51 @@ fn evaluate_body_matchers(cfg: &HttpConfig, body: &str, start: Instant) -> Stage
                 format!("body did not match regex `{}`", re.as_str()),
                 Some(hints::HTTP_BODY_REGEX_MISMATCH),
             );
+        }
+    }
+    if !cfg.jsonpath_expectations.is_empty() {
+        let value: serde_json::Value = match serde_json::from_str(body) {
+            Ok(v) => v,
+            Err(e) => {
+                return err_stage(
+                    StageKind::Http,
+                    start.elapsed(),
+                    format!("response body is not valid JSON: {e}"),
+                    Some(hints::HTTP_JSON_MISMATCH),
+                );
+            }
+        };
+        for (expr, expected) in &cfg.jsonpath_expectations {
+            let path = match serde_json_path::JsonPath::parse(expr) {
+                Ok(p) => p,
+                Err(e) => {
+                    return err_stage(
+                        StageKind::Http,
+                        start.elapsed(),
+                        format!("invalid jsonpath `{expr}`: {e}"),
+                        Some(hints::HTTP_JSON_MISMATCH),
+                    );
+                }
+            };
+            let Some(node) = path.query(&value).first() else {
+                return err_stage(
+                    StageKind::Http,
+                    start.elapsed(),
+                    format!("jsonpath `{expr}` matched no node in body"),
+                    Some(hints::HTTP_JSON_MISMATCH),
+                );
+            };
+            if !json_value_matches(node, expected) {
+                return err_stage(
+                    StageKind::Http,
+                    start.elapsed(),
+                    format!(
+                        "jsonpath `{expr}` was `{}`, expected `{expected}`",
+                        display_json_value(node)
+                    ),
+                    Some(hints::HTTP_JSON_MISMATCH),
+                );
+            }
         }
     }
     if let Some((pointer, expected)) = cfg.body_json_match.as_ref() {

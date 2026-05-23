@@ -400,6 +400,15 @@ pub(crate) struct Args {
 
     #[cfg(feature = "http")]
     #[arg(
+        long = "expect-jsonpath",
+        value_name = "EXPR=VALUE",
+        value_parser = parse_jsonpath_match,
+        help = "Require JSONPath EXPR (RFC 9535, e.g. $.items[0].name) to equal VALUE; repeatable"
+    )]
+    pub(crate) expect_jsonpath: Vec<JsonPathExpectation>,
+
+    #[cfg(feature = "http")]
+    #[arg(
         long,
         help = "Do not follow HTTP redirects, report the first response status"
     )]
@@ -493,6 +502,30 @@ impl From<TlsMinArg> for holdon::checker::http::TlsMin {
 #[cfg(feature = "http")]
 fn parse_body_regex(input: &str) -> Result<regex_lite::Regex, String> {
     regex_lite::Regex::new(input).map_err(|e| format!("invalid regex: {e}"))
+}
+
+#[cfg(feature = "http")]
+#[derive(Debug, Clone)]
+pub(crate) struct JsonPathExpectation {
+    pub expr: String,
+    pub expected: String,
+}
+
+#[cfg(feature = "http")]
+fn parse_jsonpath_match(input: &str) -> Result<JsonPathExpectation, String> {
+    let (expr, value) = input
+        .split_once('=')
+        .ok_or_else(|| "expected `EXPR=VALUE`".to_owned())?;
+    let expr = expr.trim();
+    if expr.is_empty() {
+        return Err("jsonpath expression cannot be empty".into());
+    }
+    serde_json_path::JsonPath::parse(expr)
+        .map_err(|e| format!("invalid jsonpath `{expr}`: {e}"))?;
+    Ok(JsonPathExpectation {
+        expr: expr.to_owned(),
+        expected: value.to_owned(),
+    })
 }
 
 #[cfg(feature = "http")]
