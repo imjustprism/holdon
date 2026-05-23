@@ -301,6 +301,12 @@ async fn run(args: Args) -> Result<ExitStatus> {
         args.output.into()
     };
     let mut printer = Printer::new(format, color);
+    #[cfg(feature = "json-output")]
+    let mut log_file = open_log_file(args.log_file.as_deref())?;
+    #[cfg(not(feature = "json-output"))]
+    if args.log_file.is_some() {
+        eprintln!("holdon: --log-file requires the `json-output` feature, ignoring");
+    }
 
     let exec_slice: Option<&[String]> = if args.exec.is_empty() {
         None
@@ -308,6 +314,8 @@ async fn run(args: Args) -> Result<ExitStatus> {
         Some(&args.exec)
     };
     printer.banner(&targets, &names, exec_slice);
+    #[cfg(feature = "json-output")]
+    write_log_line(&mut log_file, &output::json::start_value(&targets, &names));
 
     install_panic_hook();
     init_tracing(args.verbose);
@@ -325,7 +333,13 @@ async fn run(args: Args) -> Result<ExitStatus> {
         tokio::select! {
             biased;
             ev = rx.recv() => match ev {
-                Some(ev) => printer.handle(&ev),
+                Some(ev) => {
+                    printer.handle(&ev);
+                    #[cfg(feature = "json-output")]
+                    if let Some(v) = output::json::event_value(&ev) {
+                        write_log_line(&mut log_file, &v);
+                    }
+                }
                 None => break,
             },
             _ = ticker.tick() => printer.tick(),
@@ -349,6 +363,10 @@ async fn run(args: Args) -> Result<ExitStatus> {
     };
 
     printer.summary(&report, exec_slice);
+    #[cfg(feature = "json-output")]
+    for v in output::json::summary_values(&report) {
+        write_log_line(&mut log_file, &v);
+    }
 
     let at_least = args.at_least.or(config_data.at_least);
     let ready = if let Some(n) = at_least {
@@ -604,6 +622,32 @@ async fn wait_interrupt(flag: &AtomicU8) -> u8 {
 async fn forward_signal_to_child(child: &mut tokio::process::Child, _sig: u8) {
     let _ = child.start_kill();
     let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+}
+
+#[cfg(feature = "json-output")]
+fn open_log_file(
+    path: Option<&std::path::Path>,
+) -> Result<Option<std::io::BufWriter<std::fs::File>>> {
+    let Some(p) = path else {
+        return Ok(None);
+    };
+    let f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(p)
+        .with_context(|| format!("opening --log-file {}", p.display()))?;
+    Ok(Some(std::io::BufWriter::new(f)))
+}
+
+#[cfg(feature = "json-output")]
+fn write_log_line(sink: &mut Option<std::io::BufWriter<std::fs::File>>, value: &serde_json::Value) {
+    use std::io::Write as _;
+    if let Some(w) = sink.as_mut() {
+        if let Ok(s) = serde_json::to_string(value) {
+            let _ = writeln!(w, "{s}");
+            let _ = w.flush();
+        }
+    }
 }
 
 const fn signal_exit_code(sig: u8) -> u8 {

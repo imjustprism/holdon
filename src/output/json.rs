@@ -10,7 +10,75 @@ use holdon::diagnostic::{Stage, StageResult};
 use holdon::runner::{Event, Report, TargetReport};
 use holdon::util::duration_ms;
 
-const VERSION: u8 = 1;
+pub(crate) const VERSION: u8 = 1;
+
+pub(crate) fn start_value(targets: &[Target], names: &[Option<String>]) -> Value {
+    let entries: Vec<Value> = targets
+        .iter()
+        .enumerate()
+        .filter_map(|(i, t)| {
+            let name = names.get(i).and_then(Option::as_ref)?;
+            Some(json!({"target": t.to_string(), "name": name}))
+        })
+        .collect();
+    json!({
+        "v": VERSION,
+        "ts_unix_ms": now_unix_ms(),
+        "event": "start",
+        "targets": targets.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        "checks": entries,
+    })
+}
+
+pub(crate) fn event_value(ev: &Event) -> Option<Value> {
+    if let Event::Attempt {
+        target,
+        attempt,
+        latency,
+        ready,
+        ..
+    } = ev
+    {
+        Some(json!({
+            "v": VERSION,
+            "ts_unix_ms": now_unix_ms(),
+            "event": "attempt",
+            "target": target.to_string(),
+            "attempt": attempt,
+            "latency_ms": duration_ms(*latency),
+            "ready": ready,
+        }))
+    } else {
+        None
+    }
+}
+
+pub(crate) fn summary_values(report: &Report) -> Vec<Value> {
+    let mut out: Vec<Value> = report.results.iter().map(target_event).collect();
+    let ready_targets: Vec<String> = report
+        .results
+        .iter()
+        .filter(|r| r.satisfied)
+        .map(|r| r.target.to_string())
+        .collect();
+    let failed_targets: Vec<String> = report
+        .results
+        .iter()
+        .filter(|r| !r.satisfied)
+        .map(|r| r.target.to_string())
+        .collect();
+    out.push(json!({
+        "v": VERSION,
+        "ts_unix_ms": now_unix_ms(),
+        "event": "end",
+        "ready": report.all_ready(),
+        "elapsed_ms": duration_ms(report.elapsed),
+        "total": report.results.len(),
+        "ready_targets": ready_targets,
+        "failed_targets": failed_targets,
+    }));
+    out
+}
 
 fn now_unix_ms() -> u64 {
     SystemTime::now()
@@ -27,70 +95,19 @@ impl Json {
     }
 
     pub(crate) fn banner(&self, targets: &[Target], names: &[Option<String>]) {
-        let entries: Vec<Value> = targets
-            .iter()
-            .enumerate()
-            .filter_map(|(i, t)| {
-                let name = names.get(i).and_then(Option::as_ref)?;
-                Some(json!({"target": t.to_string(), "name": name}))
-            })
-            .collect();
-        emit(&json!({
-            "v": VERSION,
-            "ts_unix_ms": now_unix_ms(),
-            "event": "start",
-            "targets": targets.iter().map(ToString::to_string).collect::<Vec<_>>(),
-            "checks": entries,
-        }));
+        emit(&start_value(targets, names));
     }
 
     pub(crate) fn event(&self, ev: &Event) {
-        if let Event::Attempt {
-            target,
-            attempt,
-            latency,
-            ready,
-            ..
-        } = ev
-        {
-            emit(&json!({
-                "v": VERSION,
-                "ts_unix_ms": now_unix_ms(),
-                "event": "attempt",
-                "target": target.to_string(),
-                "attempt": attempt,
-                "latency_ms": duration_ms(*latency),
-                "ready": ready,
-            }));
+        if let Some(v) = event_value(ev) {
+            emit(&v);
         }
     }
 
     pub(crate) fn summary(&self, report: &Report) {
-        for r in &report.results {
-            emit(&target_event(r));
+        for v in summary_values(report) {
+            emit(&v);
         }
-        let ready_targets: Vec<String> = report
-            .results
-            .iter()
-            .filter(|r| r.satisfied)
-            .map(|r| r.target.to_string())
-            .collect();
-        let failed_targets: Vec<String> = report
-            .results
-            .iter()
-            .filter(|r| !r.satisfied)
-            .map(|r| r.target.to_string())
-            .collect();
-        emit(&json!({
-            "v": VERSION,
-            "ts_unix_ms": now_unix_ms(),
-            "event": "end",
-            "ready": report.all_ready(),
-            "elapsed_ms": duration_ms(report.elapsed),
-            "total": report.results.len(),
-            "ready_targets": ready_targets,
-            "failed_targets": failed_targets,
-        }));
     }
 }
 

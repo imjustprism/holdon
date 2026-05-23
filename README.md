@@ -190,6 +190,8 @@ Per-`[[check]]` `interval`, `attempt_timeout`, and `success_threshold` override 
 
 Explicit CLI flags always win over the config file. See [`examples/holdon.toml`](https://github.com/imjustprism/holdon/tree/main/examples/holdon.toml).
 
+`--log-file PATH` (or `HOLDON_LOG_FILE=PATH`) appends one JSON event per line to a file in addition to the terminal output. Each line carries `v`, `ts_unix_ms`, and an `event` field (`start`, `attempt`, `target`, or `end`). The file is opened in append mode so multiple runs accumulate.
+
 ## Recipes
 
 ### Docker Compose

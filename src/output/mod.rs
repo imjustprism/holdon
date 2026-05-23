@@ -1,5 +1,5 @@
 #[cfg(feature = "json-output")]
-mod json;
+pub(crate) mod json;
 mod plain;
 mod style;
 mod theme;
