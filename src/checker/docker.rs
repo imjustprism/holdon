@@ -134,12 +134,10 @@ async fn resolve_compose_container(
     }
     let containers: Vec<ComposeContainer> = serde_json::from_str(&body)
         .map_err(|e| ProbeError::Protocol(format!("invalid JSON from /containers/json: {e}")))?;
-    if containers.is_empty() {
-        return Err(ProbeError::ComposeNoMatch(service.to_owned()));
-    }
     let Some(picked) = containers
         .iter()
         .find(|c| c.state.eq_ignore_ascii_case(preferred_state))
+        .or_else(|| containers.first())
     else {
         return Err(ProbeError::ComposeNoMatch(service.to_owned()));
     };
