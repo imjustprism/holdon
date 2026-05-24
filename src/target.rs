@@ -124,6 +124,11 @@ pub enum Target {
         expect: DockerExpect,
     },
     #[non_exhaustive]
+    Compose {
+        service: String,
+        expect: DockerExpect,
+    },
+    #[non_exhaustive]
     K8s {
         kind: K8sKind,
         namespace: String,
@@ -335,6 +340,11 @@ impl fmt::Debug for Target {
                 .field("name", name)
                 .field("expect", expect)
                 .finish(),
+            Self::Compose { service, expect } => f
+                .debug_struct("Compose")
+                .field("service", service)
+                .field("expect", expect)
+                .finish(),
             Self::K8s {
                 kind,
                 namespace,
@@ -409,32 +419,11 @@ impl fmt::Display for Target {
             }
             Self::Docker { name, expect } => {
                 write!(f, "docker://{name}")?;
-                let mut first = true;
-                let mut sep = |f: &mut fmt::Formatter<'_>| -> fmt::Result {
-                    write!(f, "{}", if first { "?" } else { "&" })?;
-                    first = false;
-                    Ok(())
-                };
-                if let Some(s) = &expect.state {
-                    sep(f)?;
-                    write!(f, "state={s}")?;
-                }
-                if expect.require_healthy {
-                    sep(f)?;
-                    write!(f, "healthy=true")?;
-                }
-                match &expect.log_match {
-                    Some(LogMatcher::Substring(s)) => {
-                        sep(f)?;
-                        write!(f, "log-match={}", encode_arg(s))?;
-                    }
-                    Some(LogMatcher::Regex(re)) => {
-                        sep(f)?;
-                        write!(f, "log-regex={}", encode_arg(re.as_str()))?;
-                    }
-                    None => {}
-                }
-                Ok(())
+                write_docker_expect(f, expect)
+            }
+            Self::Compose { service, expect } => {
+                write!(f, "docker-compose://{service}")?;
+                write_docker_expect(f, expect)
             }
             Self::K8s {
                 kind,
@@ -1163,6 +1152,7 @@ impl FromStr for Target {
                 Ok(Self::Log { path, matcher })
             }
             "docker" => parse_docker_target(input, &url),
+            "docker-compose" => parse_compose_target(input, &url),
             "k8s" | "kubernetes" => parse_k8s_target(input, &url),
             "process" => parse_process_target(input, &url),
             "ws" | "wss" => {
@@ -1179,6 +1169,35 @@ impl FromStr for Target {
             other => Err(Error::UnsupportedScheme(other.into())),
         }
     }
+}
+
+fn write_docker_expect(f: &mut fmt::Formatter<'_>, expect: &DockerExpect) -> fmt::Result {
+    let mut first = true;
+    let mut sep = |f: &mut fmt::Formatter<'_>| -> fmt::Result {
+        write!(f, "{}", if first { "?" } else { "&" })?;
+        first = false;
+        Ok(())
+    };
+    if let Some(s) = &expect.state {
+        sep(f)?;
+        write!(f, "state={s}")?;
+    }
+    if expect.require_healthy {
+        sep(f)?;
+        write!(f, "healthy=true")?;
+    }
+    match &expect.log_match {
+        Some(LogMatcher::Substring(s)) => {
+            sep(f)?;
+            write!(f, "log-match={}", encode_arg(s))?;
+        }
+        Some(LogMatcher::Regex(re)) => {
+            sep(f)?;
+            write!(f, "log-regex={}", encode_arg(re.as_str()))?;
+        }
+        None => {}
+    }
+    Ok(())
 }
 
 const DOCKER_STATES: &[&str] = &[
@@ -1216,6 +1235,39 @@ fn parse_docker_target(input: &str, url: &Url) -> Result<Target> {
             "docker:// container name contains illegal characters",
         ));
     }
+    let expect = parse_docker_expect_query(input, url, "docker")?;
+    Ok(Target::Docker { name, expect })
+}
+
+fn parse_compose_target(input: &str, url: &Url) -> Result<Target> {
+    let host = url
+        .host_str()
+        .ok_or_else(|| parse_err(input, "docker-compose:// requires a service name"))?;
+    let path = url.path().trim_matches('/');
+    if !path.is_empty() {
+        return Err(parse_err(
+            input,
+            "docker-compose:// expected docker-compose://<service> (no path segments)",
+        ));
+    }
+    let service = host.to_owned();
+    if service.is_empty() {
+        return Err(parse_err(input, "docker-compose:// service name is empty"));
+    }
+    if service
+        .chars()
+        .any(|c| c.is_control() || c == ' ' || c == '\t')
+    {
+        return Err(parse_err(
+            input,
+            "docker-compose:// service name contains illegal characters",
+        ));
+    }
+    let expect = parse_docker_expect_query(input, url, "docker-compose")?;
+    Ok(Target::Compose { service, expect })
+}
+
+fn parse_docker_expect_query(input: &str, url: &Url, scheme: &str) -> Result<DockerExpect> {
     let mut expect = DockerExpect::default();
     let mut log_needle: Option<String> = None;
     let mut log_pattern: Option<String> = None;
@@ -1227,7 +1279,7 @@ fn parse_docker_target(input: &str, url: &Url) -> Result<Target> {
                     return Err(parse_err(
                         input,
                         &format!(
-                            "docker:// state `{s}` invalid (expected one of {DOCKER_STATES:?})"
+                            "{scheme}:// state `{s}` invalid (expected one of {DOCKER_STATES:?})"
                         ),
                     ));
                 }
@@ -1240,11 +1292,14 @@ fn parse_docker_target(input: &str, url: &Url) -> Result<Target> {
                 if log_needle.is_some() {
                     return Err(parse_err(
                         input,
-                        "docker:// `?log-match` may appear at most once",
+                        &format!("{scheme}:// `?log-match` may appear at most once"),
                     ));
                 }
                 if v.is_empty() {
-                    return Err(parse_err(input, "docker:// `?log-match` cannot be empty"));
+                    return Err(parse_err(
+                        input,
+                        &format!("{scheme}:// `?log-match` cannot be empty"),
+                    ));
                 }
                 log_needle = Some(v.into_owned());
             }
@@ -1252,11 +1307,14 @@ fn parse_docker_target(input: &str, url: &Url) -> Result<Target> {
                 if log_pattern.is_some() {
                     return Err(parse_err(
                         input,
-                        "docker:// `?log-regex` may appear at most once",
+                        &format!("{scheme}:// `?log-regex` may appear at most once"),
                     ));
                 }
                 if v.is_empty() {
-                    return Err(parse_err(input, "docker:// `?log-regex` cannot be empty"));
+                    return Err(parse_err(
+                        input,
+                        &format!("{scheme}:// `?log-regex` cannot be empty"),
+                    ));
                 }
                 log_pattern = Some(v.into_owned());
             }
@@ -1264,7 +1322,7 @@ fn parse_docker_target(input: &str, url: &Url) -> Result<Target> {
                 return Err(parse_err(
                     input,
                     &format!(
-                        "unknown docker:// query key `{other}` (only `state`, `healthy`, `log-match`, or `log-regex` supported)"
+                        "unknown {scheme}:// query key `{other}` (only `state`, `healthy`, `log-match`, or `log-regex` supported)"
                     ),
                 ));
             }
@@ -1274,18 +1332,18 @@ fn parse_docker_target(input: &str, url: &Url) -> Result<Target> {
         (Some(_), Some(_)) => {
             return Err(parse_err(
                 input,
-                "docker:// `?log-match` and `?log-regex` are mutually exclusive",
+                &format!("{scheme}:// `?log-match` and `?log-regex` are mutually exclusive"),
             ));
         }
         (Some(s), None) => Some(LogMatcher::Substring(s)),
         (None, Some(p)) => {
             let re = regex_lite::Regex::new(&p)
-                .map_err(|e| parse_err(input, &format!("invalid docker:// log-regex: {e}")))?;
+                .map_err(|e| parse_err(input, &format!("invalid {scheme}:// log-regex: {e}")))?;
             Some(LogMatcher::Regex(std::sync::Arc::new(re)))
         }
         (None, None) => None,
     };
-    Ok(Target::Docker { name, expect })
+    Ok(expect)
 }
 
 fn parse_k8s_target(input: &str, url: &Url) -> Result<Target> {
@@ -1981,6 +2039,60 @@ mod tests {
         assert_eq!(format!("{t}"), "process://9999");
         let t: Target = "process://node".parse().unwrap();
         assert_eq!(format!("{t}"), "process://node");
+    }
+
+    #[test]
+    fn compose_scheme_defaults() {
+        let t: Target = "docker-compose://api".parse().unwrap();
+        match t {
+            Target::Compose { service, expect } => {
+                assert_eq!(service, "api");
+                assert_eq!(expect.state, None);
+                assert!(!expect.require_healthy);
+            }
+            _ => panic!("expected Compose variant"),
+        }
+    }
+
+    #[test]
+    fn compose_with_expect_query() {
+        let t: Target = "docker-compose://api?state=running&healthy=true&log-match=ready"
+            .parse()
+            .unwrap();
+        match t {
+            Target::Compose { service, expect } => {
+                assert_eq!(service, "api");
+                assert_eq!(expect.state.as_deref(), Some("running"));
+                assert!(expect.require_healthy);
+                assert!(expect.log_match.is_some());
+            }
+            _ => panic!("expected Compose variant"),
+        }
+    }
+
+    #[test]
+    fn compose_rejects_path_segments() {
+        assert!("docker-compose://api/extra".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn compose_rejects_unknown_query() {
+        assert!("docker-compose://api?foo=bar".parse::<Target>().is_err());
+    }
+
+    #[test]
+    fn compose_display_roundtrip() {
+        let t: Target = "docker-compose://api".parse().unwrap();
+        assert_eq!(format!("{t}"), "docker-compose://api");
+        let t: Target = "docker-compose://api?state=exited".parse().unwrap();
+        assert_eq!(format!("{t}"), "docker-compose://api?state=exited");
+        let t: Target = "docker-compose://api?state=running&healthy=true"
+            .parse()
+            .unwrap();
+        assert_eq!(
+            format!("{t}"),
+            "docker-compose://api?state=running&healthy=true"
+        );
     }
 
     #[test]

@@ -120,6 +120,7 @@ pub(crate) mod hints {
     pub(crate) const DOCKER_PROTOCOL: &str = "unexpected response from the Docker engine API, ensure DOCKER_HOST points at a real Docker engine";
     pub(crate) const DOCKER_LOG_NOT_FOUND: &str = "container exists but its captured logs do not yet contain the expected text, app may still be starting";
     pub(crate) const DOCKER_LOG_TOO_LARGE: &str = "container's log tail exceeded the 2 MiB read cap, narrow the match string so it appears earlier or use a smaller tail";
+    pub(crate) const DOCKER_COMPOSE_NO_MATCH: &str = "no container has the matching docker-compose service label yet, check that `docker compose up` has been run and the service name is spelled correctly";
     pub(crate) const K8S_NO_CONFIG: &str = "could not resolve a Kubernetes API server, run inside a pod with a service account or set KUBE_SERVER and KUBE_TOKEN";
     pub(crate) const K8S_API_UNREACHABLE: &str =
         "could not reach the Kubernetes API server, check connectivity and TLS";

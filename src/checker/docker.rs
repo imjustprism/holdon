@@ -11,6 +11,7 @@ use crate::util::sanitize_for_terminal;
 
 const INSPECT_READ_CAP: usize = 64 * 1024;
 const LOG_READ_CAP: usize = 2 * 1024 * 1024;
+const QUERY_VALUE_SAFE: &percent_encoding::AsciiSet = &PATH_SAFE.add(b'&').add(b'+').add(b'=');
 
 #[derive(Debug, thiserror::Error)]
 enum ProbeError {
@@ -36,6 +37,8 @@ enum ProbeError {
     LogTooLarge(String),
     #[error("Docker engine response exceeded the read cap")]
     CapExceeded,
+    #[error("no docker compose container with label `com.docker.compose.service={0}`")]
+    ComposeNoMatch(String),
 }
 
 impl ProbeError {
@@ -49,6 +52,7 @@ impl ProbeError {
             Self::NotHealthy { .. } => hints::DOCKER_UNHEALTHY,
             Self::LogMismatch(_) => hints::DOCKER_LOG_NOT_FOUND,
             Self::LogTooLarge(_) => hints::DOCKER_LOG_TOO_LARGE,
+            Self::ComposeNoMatch(_) => hints::DOCKER_COMPOSE_NO_MATCH,
         }
     }
 }
@@ -74,6 +78,107 @@ pub(super) async fn probe(name: &str, expect: &DockerExpect, ctx: AttemptCtx) ->
         ),
     };
     vec![stage]
+}
+
+pub(super) async fn probe_compose(
+    service: &str,
+    expect: &DockerExpect,
+    ctx: AttemptCtx,
+) -> Vec<Stage> {
+    let start = Instant::now();
+    let stage = match timeout(ctx.attempt_timeout, run_compose(service, expect)).await {
+        Ok(Ok(())) => ok_stage(StageKind::Docker, start.elapsed()),
+        Ok(Err(e)) => {
+            let h = e.hint();
+            err_stage(
+                StageKind::Docker,
+                start.elapsed(),
+                sanitize_for_terminal(&e.to_string()),
+                Some(h),
+            )
+        }
+        Err(_) => err_stage(
+            StageKind::Docker,
+            ctx.attempt_timeout,
+            hints::TIMED_OUT,
+            Some(hints::DOCKER_NO_SOCKET),
+        ),
+    };
+    vec![stage]
+}
+
+async fn run_compose(service: &str, expect: &DockerExpect) -> Result<(), ProbeError> {
+    let preferred_state = expect.state.as_deref().unwrap_or("running");
+    let name = resolve_compose_container(service, preferred_state).await?;
+    run(&name, expect).await
+}
+
+async fn resolve_compose_container(
+    service: &str,
+    preferred_state: &str,
+) -> Result<String, ProbeError> {
+    let label = format!("com.docker.compose.service={service}");
+    let filter_value = format!(r#"{{"label":[{}]}}"#, encode_json_string(&label));
+    let encoded =
+        percent_encoding::utf8_percent_encode(&filter_value, QUERY_VALUE_SAFE).to_string();
+    let request = format!(
+        "GET /containers/json?all=true&filters={encoded} HTTP/1.1\r\nHost: docker\r\nAccept: application/json\r\nConnection: close\r\nUser-Agent: holdon/{ver}\r\n\r\n",
+        ver = env!("CARGO_PKG_VERSION"),
+    );
+    let raw = transport::round_trip(request.as_bytes(), INSPECT_READ_CAP).await?;
+    let (status, body) = parse_response(&raw)?;
+    if status != 200 {
+        return Err(ProbeError::Protocol(format!(
+            "unexpected HTTP {status} from /containers/json filter for `{service}`"
+        )));
+    }
+    let containers: Vec<ComposeContainer> = serde_json::from_str(&body)
+        .map_err(|e| ProbeError::Protocol(format!("invalid JSON from /containers/json: {e}")))?;
+    let Some(picked) = containers
+        .iter()
+        .find(|c| c.state.eq_ignore_ascii_case(preferred_state))
+        .or_else(|| containers.first())
+    else {
+        return Err(ProbeError::ComposeNoMatch(service.to_owned()));
+    };
+    let name = picked
+        .names
+        .iter()
+        .find_map(|n| n.strip_prefix('/').map(str::to_owned))
+        .or_else(|| picked.names.first().cloned())
+        .unwrap_or_else(|| picked.id.clone());
+    Ok(name)
+}
+
+fn encode_json_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                use std::fmt::Write as _;
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ComposeContainer {
+    #[serde(rename = "Id", default)]
+    id: String,
+    #[serde(rename = "Names", default)]
+    names: Vec<String>,
+    #[serde(rename = "State", default)]
+    state: String,
 }
 
 async fn run(name: &str, expect: &DockerExpect) -> Result<(), ProbeError> {
