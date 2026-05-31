@@ -4,6 +4,104 @@ All notable changes to this project will be documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-31
+
+### Added
+
+- `ws://` and `wss://` WebSocket handshake probes. Optional
+  `?expect-text=NEEDLE` or `?expect-regex=PATTERN` waits for the first
+  frame and matches against it. Behind the new `websocket` cargo feature.
+- `docker://name` container readiness probe. `?state=running|paused|exited|...`
+  and `?healthy=true` gate on container state and health. `?log-match=NEEDLE`
+  or `?log-regex=PATTERN` match against the last 200 log lines. Behind the
+  new `docker` cargo feature.
+- `docker-compose://service` resolves the running container carrying the
+  `com.docker.compose.service=<service>` label and applies the same
+  `?state=`, `?healthy=`, `?log-match=`, `?log-regex=` options.
+- `k8s://<kind>/<ns>/<name>` Kubernetes pod, deployment, and job readiness
+  probes. Optional `?condition=Ready,Initialized` requires every listed
+  condition type to report `True`, overriding the per-kind default. Behind
+  the new `k8s` cargo feature (depends on `http`).
+- `process://<pid>` and `process://<name>` readiness via `sysinfo`
+  (Windows strips a trailing `.exe`). Behind the new `process` cargo
+  feature. Public `ProcessSelector` re-exported from the crate root.
+- `tcp://...?expect-banner=NEEDLE` and `?expect-banner-regex=PATTERN` read
+  the first 4 KiB after connect and match against it (SMTP `220`,
+  `SSH-2.0`, etc.).
+- `dns://...?expect-ip=1.2.3.4` (or IPv6) waits until the given IP appears
+  in the resolver's answer, a DNS-propagation gate.
+- HTTP `--expect-jsonpath EXPR=VALUE` matches the response body via an RFC
+  9535 JSONPath expression. Behind the `http` feature (adds
+  `serde_json_path`).
+- HTTP `--max-redirects N` caps redirect hops per probe independently of
+  the built-in 5-hop safety ceiling.
+- HTTP `--max-rtt DURATION` soft response-time SLA. The probe reports the
+  response as acceptable but exceeding the SLA so latency regressions
+  surface before promotion.
+- `--watch` and `--watch-interval` keep probing after the first success
+  for continuous post-ready monitoring.
+- `--on-ready URL` and `--on-fail URL` fire a webhook once the run
+  resolves. `--on-transition URL` fires per ready<->fail flip in watch
+  mode. Behind the `http` feature.
+- `--log-file PATH` (env `HOLDON_LOG_FILE`) appends one JSON event line
+  per probe attempt and summary, in addition to terminal output.
+- `--validate` parses targets and config, prints the resolved plan, and
+  exits without probing. Catches typos in `holdon.toml` and shell-quoted
+  targets in CI.
+- `--max-attempts N` (env `HOLDON_MAX_ATTEMPTS`) caps retry attempts per
+  target independently of `--timeout`. Whichever limit hits first wins.
+- Env and file secret placeholders in target strings: `${env:NAME}` and
+  `${file:/path}`. Unknown kinds pass through untouched. Secret files cap
+  at 64 KiB and have a trailing newline trimmed.
+- TOML `[[check]]` blocks with `name` and `target`. Per-check `interval`,
+  `attempt_timeout`, and `success_threshold` override the global value.
+  Per-check `direction` overrides wait/reverse for that one target.
+- TOML `after = ["other-name"]` gates a `[[check]]` on one or more sibling
+  checks. A dependent fails fast with a clear message if a prerequisite
+  never becomes ready. Public `TargetOverrides` re-exported from the crate
+  root.
+- Event-driven `file://` readiness via a `notify` filesystem watcher
+  instead of polling. Behind the new `notify-fs` cargo feature.
+- `install.sh` verifies the cosign signature on `SHA256SUMS` when cosign
+  is present.
+
+### Changed
+
+- `Target` gains `Process`, `WebSocket`, `Docker`, `DockerCompose`, and
+  `K8s` variants, appended after the existing set. `StageKind` gains the
+  matching variants. Both stay `#[non_exhaustive]`; matches need a
+  wildcard arm.
+- `full` feature now bundles `docker`, `k8s`, `notify-fs`, `websocket`,
+  and `process` alongside the existing probe set.
+- Dependency floors bumped: `tokio` 1.44.2 (RUSTSEC-2025-0023 patch),
+  `clap` 4.6, `clap_mangen` 0.3, `toml` 1.1, `http` 1.4, plus minor
+  bumps across `owo-colors`, `fastrand`, and the dev dependencies.
+
+### Fixed
+
+- TLS posture enforced across credentialed schemes; cleartext credentials
+  refused rather than silently sent in the clear.
+- Passwords and URL userinfo redacted after percent-decoding, so
+  encoded forms cannot bypass the scrub. `MissingPort` and parse errors
+  scrub userinfo too.
+- Hostname validation rejects C1 control characters.
+- Config auto-detect rejects symlinks and strips the TOML body from
+  auto-detect error messages.
+- `parse_duration` rejects overflowing inputs instead of clamping near
+  the `never` sentinel.
+- `exec://` stderr snippet truncates on a char boundary to avoid a UTF-8
+  boundary panic.
+- HTTP probe fails loudly on a client build error instead of proceeding
+  with a half-built client. Process-wide `--insecure` documented.
+- MongoDB ping wrapped in `attempt_timeout` so SRV lookups cannot stall
+  past the per-attempt budget.
+
+### Internal
+
+- All non-doc comments stripped from Rust sources per the zero-comment
+  rule. CI release-permission scoping fixed and nonexistent artifact
+  action versions corrected.
+
 ## [0.3.0] - 2026-05-15
 
 ### Added
@@ -257,7 +355,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `--insecure` emits a stderr warning on every run
 - Stdin target ingest capped at 10 000 entries and 2 KiB per string
 
-[Unreleased]: https://github.com/imjustprism/holdon/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/imjustprism/holdon/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/imjustprism/holdon/releases/tag/v0.4.0
+[0.3.0]: https://github.com/imjustprism/holdon/releases/tag/v0.3.0
 [0.2.1]: https://github.com/imjustprism/holdon/releases/tag/v0.2.1
 [0.2.0]: https://github.com/imjustprism/holdon/releases/tag/v0.2.0
 [0.1.2]: https://github.com/imjustprism/holdon/releases/tag/v0.1.2
