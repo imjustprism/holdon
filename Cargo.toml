@@ -163,7 +163,7 @@ tokio-tungstenite = { version = "0.28", default-features = false, features = [
   "connect",
   "handshake",
 ], optional = true }
-sysinfo = { version = "0.32", default-features = false, features = ["system"], optional = true }
+sysinfo = { version = "0.36", default-features = false, features = ["system"], optional = true }
 futures-util = { version = "0.3", default-features = false, features = ["std"], optional = true }
 
 [dev-dependencies]
